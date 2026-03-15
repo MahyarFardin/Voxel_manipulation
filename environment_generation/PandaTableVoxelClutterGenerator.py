@@ -11,155 +11,85 @@ class PandaTableVoxelClutterGenerator:
     PandaTableVoxelClutterGenerator
     ===============================
 
-    High-level idea
-    ---------------
-    This class generates cluttered table scenes containing:
-    1. A Panda robot and a table loaded from a base RAI scene.
+    This class generates cluttered Panda-table scenes containing:
+    1. A Panda robot and table loaded from a base RAI scene.
     2. Multiple voxel objects loaded from pre-generated voxel .g files.
-    3. Optionally, a colored target-surface marker placed on the table.
-       This marker represents one stable resting face of one chosen voxel object.
+    3. Optionally, a thin 2D marker ("shadow"/target surface) placed on the
+       opposite half of the table, representing one stable resting face of a
+       chosen target voxel.
 
-    The goal is to create scenes where many voxel objects physically settle on the table,
-    instead of simply placing them in final positions directly.
+    Main pipeline
+    -------------
+    1. Load base scene.
+    2. Optionally choose a target voxel and one stable resting face.
+    3. Place a 2D marker of that face on the opposite half of the table.
+    4. Spawn the matching target voxel into the clutter half.
+    5. Spawn extra clutter voxels above the table.
+    6. Simulate physics so objects settle.
+    7. Remove objects that fell off / are invalid.
+    8. Refill missing ones and repeat.
+    9. Before returning, remove any final remaining off-table voxels so the
+       returned config matches what "final_on_table" says.
 
-    ----------------------------------------------------------------------
-    New feature: split-table generation
-    ----------------------------------------------------------------------
-    The generator supports restricting voxel spawning to only one half of the table.
+    Important fixes in this version
+    -------------------------------
+    - Final off-table objects are removed before returning.
+      So you should no longer see extra voxels on the ground in the final config.
+    - The target voxel file name and the target 2D marker parent frame name are
+      returned in the summary.
+    - The 2D target marker is now created under a single parent frame:
+          targetSurface
+      and its colored tiles are children of that frame.
 
-    Supported modes:
-    - None    : use the full table
-    - "front" : use the lower-y half of the table
-    - "back"  : use the upper-y half of the table
-    - "left"  : use the lower-x half of the table
-    - "right" : use the upper-x half of the table
+    Split-table generation
+    ----------------------
+    Supported spawn_half_mode values:
+    - None
+    - "front" : lower-y half
+    - "back"  : upper-y half
+    - "left"  : lower-x half
+    - "right" : upper-x half
 
-    Important:
-    - Actual voxel objects are spawned in the selected half.
-    - The 2D target-surface marker is placed in the opposite half.
-      For example:
-        * voxels in "left"  -> marker in "right"
-        * voxels in "front" -> marker in "back"
-
-    ----------------------------------------------------------------------
-    How the generation pipeline works
-    ----------------------------------------------------------------------
-    The overall generation process is:
-
-    1. Load the base scene
-       - Load the Panda + table scene from a .g file.
-       - Resize / reposition the table and Panda base if desired.
-
-    2. Optionally choose a "target voxel" and one stable resting side
-       - A voxel file is chosen uniformly from those that have at least one stable resting face.
-       - Then one stable face of that voxel is chosen uniformly.
-       - A marker is placed on the table with the same footprint and colors as that support face.
-       - That marker is placed on the opposite half of the table.
-       - Then that same voxel is spawned somewhere in the clutter half.
-
-    3. Spawn some additional voxel objects
-       - Objects are spawned above the table with random XY location and random Z rotation.
-       - They are not placed directly in final resting positions.
-       - Instead, they are dropped from above and allowed to settle with physics.
-
-    4. Run physics simulation
-       - Some objects remain on the table.
-       - Some may fall off the table or end up outside the valid region.
-
-    5. Remove failed objects and refill missing ones
-       - After simulation, we check which objects are still on the table.
-       - Objects that fell off are deleted from the scene.
-       - New objects are spawned to replace missing ones.
-
-    6. Repeat until enough objects remain on the table
-       - This continues for multiple rounds, up to a maximum number of refill rounds.
-
-    ----------------------------------------------------------------------
-    Why do we do multiple spawn / simulate / refill rounds?
-    ----------------------------------------------------------------------
-    If we only spawn all objects once, many of them may:
-    - collide badly during falling,
-    - get pushed off the table,
-    - land outside the valid region,
-    - or create overly unstable clutter.
-
-    Because of that, a single spawn pass often does not leave the desired number
-    of objects on the table.
-
-    So instead, the generator uses a best-effort iterative approach:
-    - spawn some objects,
-    - simulate,
-    - remove the ones that failed,
-    - respawn replacements,
-    - simulate again.
-
-    This makes the final scene much more robust, because the generator keeps trying
-    until either:
-    - the requested number of objects remain on the table, or
-    - the maximum refill limit is reached.
-
-    ----------------------------------------------------------------------
-    Important concepts in the code
-    ----------------------------------------------------------------------
-    - "occupied rectangles":
-        For spawning, each object is approximated by an XY rectangle on the table.
-        This allows fast collision-free placement before physics starts.
-
-    - "stable resting surface":
-        For a given voxel shape, a face is considered stably restable if the projected
-        center of mass lies inside the support polygon formed by the cubes touching that face.
-
-    - "target surface marker":
-        A thin colored patch placed on the table that visually represents the support
-        footprint of one stable side of the chosen target voxel.
-
-    - "reserved file":
-        Once the target voxel file is chosen, it is reserved so that clutter spawning
-        does not immediately reuse the same file unintentionally.
+    Voxels spawn in the chosen half, while the target marker is placed in the
+    opposite half.
 
     Parameters
     ----------
     base_scene_file : str or Path
-        Path to the base RAI scene file containing the Panda robot and the table.
+        Path to the base Panda/table scene.
 
     voxel_dir : str or Path
-        Directory containing voxel .g files that will be used as clutter objects.
+        Folder containing voxel .g files.
 
     output_dir : str or Path
-        Directory where generated environment files will be saved.
+        Folder where generated environments can be saved.
 
     table_frame_name : str
-        Name of the table frame inside the base scene.
+        Name of the table frame in the scene.
 
     gap : float
-        Minimum spacing margin used when placing voxel objects and marker regions in XY.
+        Extra spacing margin used during XY placement.
 
     spawn_height : float
-        Extra vertical offset above the table from which objects are spawned before falling.
+        Height above the table from which objects are dropped.
 
     seed : int
-        Random seed for reproducibility.
+        Random seed.
 
     per_cube_mass : float
-        Mass assigned to each cube frame of a voxel object for physics simulation.
+        Mass assigned to each cube of a voxel object.
 
     table_shape_size : tuple
-        New size of the table frame, typically (x_size, y_size, z_size, rounding).
+        Replacement table size: (x_size, y_size, z_size, rounding).
 
     panda_base_relative_pos : tuple
-        Relative position assigned to frame 'l_panda_base'.
+        Relative position for frame 'l_panda_base'.
 
     marker_thickness : float
-        Thickness of the thin target-surface tiles placed on the table.
+        Thickness of the 2D target marker tiles.
 
     spawn_half_mode : None or str
-        Restrict voxel spawning to one half of the table.
-        Allowed values:
-        - None
-        - "front"
-        - "back"
-        - "left"
-        - "right"
+        Restrict spawning to one half of the table.
     """
 
     def __init__(
@@ -175,43 +105,20 @@ class PandaTableVoxelClutterGenerator:
         table_shape_size=(1.6, 1.6, 0.08, 0.02),
         panda_base_relative_pos=(0.0, 0.0, 0.05),
         marker_thickness=0.004,
-        spawn_half_mode=None,  # None, "front", "back", "left", "right"
+        spawn_half_mode=None,
     ):
-        # Path to the base Panda+table scene
         self.base_scene_file = Path(base_scene_file)
-
-        # Folder containing voxel .g files that define clutter objects
         self.voxel_dir = Path(voxel_dir)
-
-        # Folder where final generated environments will be saved
         self.output_dir = Path(output_dir)
-
-        # Name of the table frame in the loaded base scene
         self.table_frame_name = table_frame_name
-
-        # Minimum extra spacing used between rectangles during XY placement
-        self.gap = gap
-
-        # Height above the table where an object is initially spawned before falling
+        self.gap = float(gap)
         self.spawn_height = float(spawn_height)
-
-        # Random seed for reproducibility
         self.seed = seed
-
-        # Mass assigned to each cube in a voxel object during simulation
-        self.per_cube_mass = per_cube_mass
-
-        # New table size written into the base scene:
-        # (x_size, y_size, z_size, rounding)
+        self.per_cube_mass = float(per_cube_mass)
         self.table_shape_size = list(table_shape_size)
-
-        # Position offset for the Panda base relative to its parent
         self.panda_base_relative_pos = list(panda_base_relative_pos)
-
-        # Thickness of target-surface marker tiles placed on the table
         self.marker_thickness = float(marker_thickness)
 
-        # Restrict spawning to one half of the table if requested
         valid_modes = {None, "front", "back", "left", "right"}
         if spawn_half_mode not in valid_modes:
             raise ValueError(
@@ -219,27 +126,20 @@ class PandaTableVoxelClutterGenerator:
             )
         self.spawn_half_mode = spawn_half_mode
 
-        # Make sure the base scene exists
         if not self.base_scene_file.exists():
             raise FileNotFoundError(f"Base scene file not found: {self.base_scene_file}")
 
-        # Ensure output directory exists
         self.output_dir.mkdir(parents=True, exist_ok=True)
 
-        # Use NumPy random generator for controlled reproducibility
         self.rng = np.random.default_rng(self.seed)
 
-        # Tracking for generated objects
-        self.spawned_objects = []   # metadata for all spawned objects
-        self.used_files = set()     # voxel files already used in spawning
-        self.reserved_files = set() # voxel files that should be excluded from normal clutter spawning
-        self.object_counter = 0     # unique counter for obj0_, obj1_, ...
-
-        # Static occupied rectangles that should block new spawning
-        # Example: the target marker footprint
+        # Tracking for current environment generation
+        self.spawned_objects = []
+        self.used_files = set()
+        self.reserved_files = set()
+        self.object_counter = 0
         self.static_rects = []
 
-        # Information about the chosen target surface / voxel
         self.target_surface_info = None
         self.target_voxel_file = None
         self.target_surface_choice = None
@@ -248,33 +148,15 @@ class PandaTableVoxelClutterGenerator:
     # Basic helpers
     # =========================================================
     def _cube_frames(self, C: ry.Config, prefix: str):
-        """
-        Return all frame names in config C that:
-        - start with the given prefix, and
-        - contain 'cube' in the name.
-
-        This is used to find the cube frames belonging to one voxel object.
-        """
+        """Return all cube frame names starting with the given prefix."""
         return [n for n in C.getFrameNames() if n.startswith(prefix) and "cube" in n]
 
     def _quat_from_z_rotation(self, theta: float):
-        """
-        Create a quaternion for a pure rotation around the z-axis by angle theta.
-        Quaternion format here is [w, x, y, z].
-
-        This is used to randomly rotate voxel objects around the vertical axis.
-        """
+        """Quaternion [w, x, y, z] for pure z-axis rotation."""
         return [float(np.cos(theta / 2.0)), 0.0, 0.0, float(np.sin(theta / 2.0))]
 
     def _load_voxel_files(self):
-        """
-        Load and return all voxel .g files from self.voxel_dir.
-
-        Raises
-        ------
-        FileNotFoundError
-            If no voxel files are found.
-        """
+        """Load all voxel .g files from the voxel directory."""
         voxel_files = sorted(glob(str(self.voxel_dir / "*.g")))
         if not voxel_files:
             raise FileNotFoundError(f"No voxel files found in: {self.voxel_dir}")
@@ -282,33 +164,24 @@ class PandaTableVoxelClutterGenerator:
 
     def _load_base_scene(self):
         """
-        Load the base Panda scene, verify required frames, and apply:
-        - table shape override
-        - Panda base position override
-
-        Returns
-        -------
-        ry.Config
-            The initialized scene config.
+        Load the Panda/table base scene and apply:
+        - table geometry override
+        - Panda base relative position override
         """
         C = ry.Config()
         C.addFile(str(self.base_scene_file))
 
-        # Ensure the table exists
         if self.table_frame_name not in C.getFrameNames():
             raise ValueError(f"Table frame '{self.table_frame_name}' not found in scene.")
 
-        # Ensure Panda base exists
         if "l_panda_base" not in C.getFrameNames():
             raise ValueError("Frame 'l_panda_base' not found in scene.")
 
-        # Override the table geometry
         C.getFrame(self.table_frame_name).setShape(
             ry.ST.ssBox,
             self.table_shape_size
         )
 
-        # Reposition Panda base if needed
         C.getFrame("l_panda_base").setRelativePosition(
             self.panda_base_relative_pos
         )
@@ -319,22 +192,7 @@ class PandaTableVoxelClutterGenerator:
     # Scene geometry
     # =========================================================
     def _get_table_info(self, C: ry.Config):
-        """
-        Return useful information about the table:
-        - frame object
-        - center position
-        - size
-        - top z value
-
-        Returns
-        -------
-        dict
-            Contains:
-            - frame
-            - pos
-            - size
-            - top_z
-        """
+        """Return table frame, center, size, and top z."""
         if self.table_frame_name not in C.getFrameNames():
             raise ValueError(f"Table frame '{self.table_frame_name}' not found in scene.")
 
@@ -343,7 +201,9 @@ class PandaTableVoxelClutterGenerator:
         table_size = np.array(table.getSize(), dtype=float)
 
         if len(table_size) < 3:
-            raise ValueError(f"Table frame '{self.table_frame_name}' does not have a valid box size.")
+            raise ValueError(
+                f"Table frame '{self.table_frame_name}' does not have a valid box size."
+            )
 
         tx, ty, tz = float(table_size[0]), float(table_size[1]), float(table_size[2])
         px, py, pz = float(table_pos[0]), float(table_pos[1]), float(table_pos[2])
@@ -356,18 +216,7 @@ class PandaTableVoxelClutterGenerator:
         }
 
     def _table_bounds_xy(self, C: ry.Config, margin=0.0):
-        """
-        Compute the valid XY bounds of the full table.
-
-        Parameters
-        ----------
-        margin : float
-            Optional inward margin to shrink the usable area.
-
-        Returns
-        -------
-        (xmin, xmax, ymin, ymax)
-        """
+        """Return full table XY bounds as (xmin, xmax, ymin, ymax)."""
         info = self._get_table_info(C)
         tx, ty, _ = info["size"]
         px, py, _ = info["pos"]
@@ -379,15 +228,7 @@ class PandaTableVoxelClutterGenerator:
         return xmin, xmax, ymin, ymax
 
     def _opposite_half_mode(self, half_mode):
-        """
-        Return the opposite half-table mode.
-
-        Mapping
-        -------
-        - front <-> back
-        - left  <-> right
-        - None  -> None
-        """
+        """Return opposite split-table mode."""
         if half_mode is None:
             return None
         if half_mode == "front":
@@ -402,30 +243,8 @@ class PandaTableVoxelClutterGenerator:
 
     def _spawn_region_bounds_xy(self, C: ry.Config, margin=0.0, half_mode=None):
         """
-        Return the XY bounds of the allowed placement region.
-
-        If half_mode is None, use self.spawn_half_mode.
-        If the resolved mode is still None, the full table is used.
-
-        Supported modes:
-        - None
-        - "front": lower-y half
-        - "back" : upper-y half
-        - "left" : lower-x half
-        - "right": upper-x half
-
-        Parameters
-        ----------
-        margin : float
-            Optional inward margin to shrink the region.
-
-        half_mode : None or str
-            Optional override for which half to use.
-
-        Returns
-        -------
-        (xmin, xmax, ymin, ymax)
-            Bounds of the active region.
+        Return XY bounds of the active placement region.
+        If half_mode is None, self.spawn_half_mode is used.
         """
         xmin, xmax, ymin, ymax = self._table_bounds_xy(C, margin=margin)
 
@@ -440,30 +259,22 @@ class PandaTableVoxelClutterGenerator:
 
         if half_mode == "front":
             return xmin, xmax, ymin, ymid
-        elif half_mode == "back":
+        if half_mode == "back":
             return xmin, xmax, ymid, ymax
-        elif half_mode == "left":
+        if half_mode == "left":
             return xmin, xmid, ymin, ymax
-        elif half_mode == "right":
+        if half_mode == "right":
             return xmid, xmax, ymin, ymax
-        else:
-            raise ValueError(f"Unknown half mode: {half_mode}")
+
+        raise ValueError(f"Unknown half mode: {half_mode}")
 
     def _voxel_cube_geometry(self, file_path: str):
         """
-        Load a voxel .g file temporarily and extract per-cube geometry:
-        - cube frame name
+        Load a voxel file temporarily and extract per-cube local geometry:
+        - name
         - local position
         - size
         - color
-
-        This does not yet place the object into the real scene. It is only used
-        for geometry analysis, stable-face analysis, and spawn-size estimation.
-
-        Returns
-        -------
-        list of dict
-            One entry per cube.
         """
         T = ry.Config()
         T.addFile(file_path, namePrefix="tmp_")
@@ -476,22 +287,20 @@ class PandaTableVoxelClutterGenerator:
         for nm in cube_names:
             fr = T.getFrame(nm)
 
-            # Cube dimensions
             size = np.array(fr.getSize()[:3], dtype=float)
-
-            # Cube center in local voxel coordinates
             pos = np.array(fr.getPosition(), dtype=float)
 
-            # Default color in case color is not explicitly stored
             color = [0.8, 0.8, 0.8]
-
-            # Try to read color from frame attributes
             try:
                 attrs = fr.getAttributes()
                 if "color" in attrs:
                     raw_color = list(attrs["color"])
                     if len(raw_color) >= 3:
-                        color = [float(raw_color[0]), float(raw_color[1]), float(raw_color[2])]
+                        color = [
+                            float(raw_color[0]),
+                            float(raw_color[1]),
+                            float(raw_color[2]),
+                        ]
             except Exception:
                 pass
 
@@ -505,14 +314,7 @@ class PandaTableVoxelClutterGenerator:
         return cubes
 
     def _local_aabb(self, cubes):
-        """
-        Compute local axis-aligned bounding box (AABB) of a voxel object.
-
-        Returns
-        -------
-        (min_corner, max_corner)
-            3D corners of the bounding box in local coordinates.
-        """
+        """Compute local 3D AABB of a voxel from its cubes."""
         min_corner = np.array([np.inf, np.inf, np.inf], dtype=float)
         max_corner = np.array([-np.inf, -np.inf, -np.inf], dtype=float)
 
@@ -526,14 +328,8 @@ class PandaTableVoxelClutterGenerator:
 
     def _rotated_xy_aabb_size(self, cubes, theta: float):
         """
-        Estimate the XY footprint size of a voxel after rotation by theta around z.
-
-        We rotate each cube's XY rectangle corners and take the min/max across all cubes.
-
-        Returns
-        -------
-        min_xy, max_xy, size_xy
-            Rotated XY bounding box and its size.
+        Compute the rotated XY AABB of a voxel after z rotation by theta.
+        Returns (min_xy, max_xy, size_xy).
         """
         c = np.cos(theta)
         s = np.sin(theta)
@@ -547,7 +343,6 @@ class PandaTableVoxelClutterGenerator:
             sx, sy = cube["size"][:2]
             hx, hy = sx / 2.0, sy / 2.0
 
-            # Corners of this cube's XY box
             corners = np.array([
                 [center_xy[0] - hx, center_xy[1] - hy],
                 [center_xy[0] - hx, center_xy[1] + hy],
@@ -555,7 +350,6 @@ class PandaTableVoxelClutterGenerator:
                 [center_xy[0] + hx, center_xy[1] + hy],
             ])
 
-            # Rotate corners into the candidate object orientation
             rotated = corners @ R.T
             min_xy = np.minimum(min_xy, rotated.min(axis=0))
             max_xy = np.maximum(max_xy, rotated.max(axis=0))
@@ -563,12 +357,7 @@ class PandaTableVoxelClutterGenerator:
         return min_xy, max_xy, (max_xy - min_xy)
 
     def _rectangles_overlap(self, rect1, rect2, extra_gap=0.0):
-        """
-        Check if two axis-aligned rectangles overlap in XY,
-        optionally with an additional safety gap.
-
-        Each rectangle is (xmin, xmax, ymin, ymax).
-        """
+        """Check overlap of two axis-aligned XY rectangles."""
         x1_min, x1_max, y1_min, y1_max = rect1
         x2_min, x2_max, y2_min, y2_max = rect2
 
@@ -580,24 +369,14 @@ class PandaTableVoxelClutterGenerator:
         )
 
     # =========================================================
-    # 2D geometry helpers for stability
+    # 2D stability helpers
     # =========================================================
     def _cross2d(self, o, a, b):
-        """
-        2D cross product sign for orientation testing.
-        Used in convex hull construction and polygon checks.
-        """
+        """Signed 2D cross product used in convex hull tests."""
         return (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0])
 
     def _convex_hull_2d(self, points):
-        """
-        Compute 2D convex hull of a set of points using the monotonic chain algorithm.
-
-        Returns
-        -------
-        list of (x, y)
-            Hull vertices in order.
-        """
+        """Monotonic-chain convex hull."""
         pts = sorted(set((float(p[0]), float(p[1])) for p in points))
         if len(pts) <= 1:
             return pts
@@ -617,10 +396,7 @@ class PandaTableVoxelClutterGenerator:
         return lower[:-1] + upper[:-1]
 
     def _point_on_segment_2d(self, p, a, b, tol=1e-9):
-        """
-        Check whether point p lies on the line segment a-b.
-        Used as a degenerate case in convex polygon tests.
-        """
+        """Check if p lies on segment a-b."""
         ap = np.array(p) - np.array(a)
         ab = np.array(b) - np.array(a)
         cross = abs(ab[0] * ap[1] - ab[1] * ap[0])
@@ -634,13 +410,7 @@ class PandaTableVoxelClutterGenerator:
         return True
 
     def _point_in_convex_polygon_2d(self, p, poly, tol=1e-9):
-        """
-        Check whether point p lies inside or on the boundary of a convex polygon.
-
-        This is used to test stability:
-        if the projected center of mass lies inside the support polygon,
-        then that face is considered stably restable.
-        """
+        """Check if point p is inside or on a convex polygon."""
         if len(poly) == 0:
             return False
         if len(poly) == 1:
@@ -662,21 +432,14 @@ class PandaTableVoxelClutterGenerator:
                 sign = current
             elif sign != current:
                 return False
+
         return True
 
     # =========================================================
     # Stable resting-surface analysis
     # =========================================================
     def _cube_com(self, cubes):
-        """
-        Compute the approximate center of mass of the voxel object by treating
-        each cube mass as proportional to its volume.
-
-        Returns
-        -------
-        np.ndarray, shape (3,)
-            COM in local voxel coordinates.
-        """
+        """Approximate center of mass by volume-weighted cube centers."""
         masses = []
         centers = []
 
@@ -697,31 +460,11 @@ class PandaTableVoxelClutterGenerator:
 
     def _resting_surface_info(self, cubes, axis, use_max_side, tol=1e-8):
         """
-        Analyze one candidate resting face of the voxel object.
-
-        Parameters
-        ----------
-        cubes : list
-            Cube geometry dictionaries.
-
-        axis : int
-            0 -> x face
-            1 -> y face
-            2 -> z face
-
-        use_max_side : bool
-            False -> negative face (-x / -y / -z)
-            True  -> positive face (+x / +y / +z)
-
-        Returns
-        -------
-        dict or None
-            Detailed information about this candidate support face.
+        Analyze one candidate support face and determine if it is stable.
+        A face is stable if the COM projection lies inside the support hull.
         """
-        # The 2 axes that remain after projecting away the support axis
         other_axes = [ax for ax in [0, 1, 2] if ax != axis]
 
-        # Determine which cubes touch the chosen outermost plane
         if use_max_side:
             plane_val = max(c["pos"][axis] + c["size"][axis] / 2.0 for c in cubes)
             touching = [
@@ -740,7 +483,6 @@ class PandaTableVoxelClutterGenerator:
         if len(touching) == 0:
             return None
 
-        # Build support geometry in the 2D plane of contact
         support_rects = []
         corners = []
         min_xy = np.array([np.inf, np.inf], dtype=float)
@@ -773,14 +515,9 @@ class PandaTableVoxelClutterGenerator:
                 (hi[0], hi[1]),
             ])
 
-        # Convex hull of support contact corners
         hull = self._convex_hull_2d(corners)
-
-        # Project global center of mass into that 2D support plane
         com = self._cube_com(cubes)
         com_proj = com[other_axes]
-
-        # Stable if projected COM lies inside the support hull
         stable = self._point_in_convex_polygon_2d(com_proj, hull, tol=1e-8)
 
         return {
@@ -801,15 +538,7 @@ class PandaTableVoxelClutterGenerator:
         }
 
     def _stable_resting_surfaces(self, cubes):
-        """
-        Check all 6 axis-aligned outer faces of the voxel object and return
-        those that are stable resting candidates.
-
-        Returns
-        -------
-        list of dict
-            Stable resting surface infos.
-        """
+        """Return all stable axis-aligned outer support faces."""
         surfaces = []
         for axis in [0, 1, 2]:
             for use_max_side in [False, True]:
@@ -819,17 +548,12 @@ class PandaTableVoxelClutterGenerator:
         return surfaces
 
     # =========================================================
-    # Occupancy from existing scene
+    # Occupancy helpers
     # =========================================================
     def _frame_xy_rect(self, fr):
         """
-        Approximate one frame by its XY bounding rectangle using frame size and position.
-
-        Returns
-        -------
-        rect or None
-            (xmin, xmax, ymin, ymax)
-            Returns None if the frame does not have a valid size.
+        Approximate a frame by an XY rectangle using its size and position.
+        Returns None if no meaningful size exists.
         """
         try:
             size = np.array(fr.getSize(), dtype=float)
@@ -851,31 +575,24 @@ class PandaTableVoxelClutterGenerator:
 
     def _scene_occupied_rects(self, C: ry.Config):
         """
-        Collect XY rectangles that are already occupying table space.
+        Collect XY rectangles already occupying table space.
 
-        Exclusions:
-        - frames belonging to spawned voxel objects (obj*)
-        - the table frame itself
-        - target marker tiles (targetSurface_*)
-
-        Why?
-        Because when spawning new voxel objects, we want to treat static scene
-        obstacles and marker footprints as occupied, but not double-count the
-        already-tracked dynamic objects in the same way.
-
-        Returns
-        -------
-        list of rectangles
+        Excluded:
+        - spawned voxel frames (obj*)
+        - the table itself
+        - target surface parent and tiles
         """
         rects = []
         names = C.getFrameNames()
+
+        xmin, xmax, ymin, ymax = self._table_bounds_xy(C, margin=0.0)
 
         for nm in names:
             if nm.startswith("obj"):
                 continue
             if nm == self.table_frame_name:
                 continue
-            if nm.startswith("targetSurface_"):
+            if nm == "targetSurface" or nm.startswith("targetSurface_"):
                 continue
 
             fr = C.getFrame(nm)
@@ -883,9 +600,7 @@ class PandaTableVoxelClutterGenerator:
             if rect is None:
                 continue
 
-            xmin, xmax, ymin, ymax = self._table_bounds_xy(C, margin=0.0)
             rxmin, rxmax, rymin, rymax = rect
-
             overlaps_table_xy = not (
                 rxmax <= xmin or rxmin >= xmax or
                 rymax <= ymin or rymin >= ymax
@@ -894,17 +609,14 @@ class PandaTableVoxelClutterGenerator:
             if overlaps_table_xy:
                 rects.append(rect)
 
-        # Add explicitly-tracked occupied regions such as marker footprints
         rects.extend(self.static_rects)
         return rects
 
     # =========================================================
-    # Tracking
+    # Tracking reset
     # =========================================================
     def _reset_tracking(self):
-        """
-        Reset per-environment generation state before starting a fresh scene.
-        """
+        """Reset per-environment state."""
         self.spawned_objects = []
         self.used_files = set()
         self.reserved_files = set()
@@ -915,25 +627,13 @@ class PandaTableVoxelClutterGenerator:
         self.target_surface_choice = None
 
     # =========================================================
-    # New target selection order:
-    # 1) choose voxel uniformly from eligible voxels
-    # 2) choose one stable side uniformly
-    # 3) place sticker on opposite half
-    # 4) spawn same voxel in clutter half
-    # 5) fill clutter
+    # Target voxel selection
     # =========================================================
     def _choose_target_voxel_and_side(self):
         """
         Choose:
-        1. one voxel uniformly among voxel files that have at least one stable face,
-        2. one stable face uniformly from that voxel.
-
-        This ensures the target selection is not biased toward voxel files
-        having many stable faces.
-
-        Returns
-        -------
-        (voxel_file, cubes, surface)
+        1. one voxel uniformly among eligible voxel files,
+        2. one stable side uniformly from that voxel.
         """
         voxel_files = self._load_voxel_files()
         eligible = []
@@ -960,14 +660,12 @@ class PandaTableVoxelClutterGenerator:
 
     def _place_target_surface_marker(self, C: ry.Config):
         """
-        Place a thin colored marker on the table that matches the chosen target face.
+        Place a 2D colored marker for the chosen target face.
 
-        The marker is composed of one thin tile per touching support cube.
-        These tiles preserve the footprint and color structure of the chosen face.
-
-        Important:
-        - Voxels spawn in self.spawn_half_mode.
-        - The target surface marker is placed in the opposite half.
+        Implementation detail:
+        - A single parent frame 'targetSurface' is created.
+        - Each colored tile becomes a child frame under it.
+        - This gives one marker parent frame name that can be returned.
         """
         if self.target_voxel_file is None or self.target_surface_choice is None:
             raise RuntimeError("Target voxel/side has not been chosen yet.")
@@ -975,13 +673,9 @@ class PandaTableVoxelClutterGenerator:
         voxel_file = self.target_voxel_file
         surface = self.target_surface_choice
 
-        # Marker size in XY is the bounding box of the chosen support face
         size_xy = surface["bbox_size_2d"]
-
-        # Place marker in the opposite half of the voxel spawn region
         marker_half_mode = self._opposite_half_mode(self.spawn_half_mode)
 
-        # Avoid placing marker on top of already occupied regions
         placed_rects = self._scene_occupied_rects(C)
         cx, cy, rect = self._sample_noncolliding_xy(
             C,
@@ -991,35 +685,38 @@ class PandaTableVoxelClutterGenerator:
         )
 
         table_info = self._get_table_info(C)
-
-        # Place marker slightly above the table top so it is visible
         z_marker = table_info["top_z"] + self.marker_thickness / 2.0
 
-        # Center support tiles around the marker center
         local_center_2d = 0.5 * (surface["bbox_min_2d"] + surface["bbox_max_2d"])
 
-        marker_prefix = "targetSurface_"
+        marker_parent_name = "targetSurface"
         tile_names = []
 
+        # Remove stale targetSurface if somehow present
+        if marker_parent_name in C.getFrameNames():
+            C.delFrame(marker_parent_name)
+
+        C.addFrame(marker_parent_name).setPosition([cx, cy, z_marker])
+
         for i, r in enumerate(surface["support_rects"]):
-            # Convert local support tile coordinates into world table coordinates
             tile_center_local = r["center_2d"] - local_center_2d
-            world_x = cx + float(tile_center_local[0])
-            world_y = cy + float(tile_center_local[1])
 
             sx = float(r["size_2d"][0])
             sy = float(r["size_2d"][1])
             tile_color = [float(c) for c in r["color"][:3]]
 
-            nm = f"{marker_prefix}tile_{i}"
-            C.addFrame(nm) \
+            nm = f"{marker_parent_name}_tile_{i}"
+            C.addFrame(nm, marker_parent_name) \
                 .setShape(ry.ST.ssBox, size=[sx, sy, self.marker_thickness, 0.001]) \
                 .setColor(tile_color) \
-                .setPosition([world_x, world_y, z_marker])
+                .setRelativePosition([
+                    float(tile_center_local[0]),
+                    float(tile_center_local[1]),
+                    0.0,
+                ])
 
             tile_names.append(nm)
 
-        # Reserve the marker footprint so spawned objects do not overlap it
         self.static_rects.append(rect)
 
         self.target_surface_info = {
@@ -1032,6 +729,7 @@ class PandaTableVoxelClutterGenerator:
             "support_cube_count": len(surface["touching_cubes"]),
             "marker_center_xy": (cx, cy),
             "marker_rect": rect,
+            "marker_frame_name": marker_parent_name,
             "marker_tile_names": tile_names,
             "support_bbox_size_2d": surface["bbox_size_2d"].tolist(),
             "com_local": surface["com"].tolist(),
@@ -1043,14 +741,7 @@ class PandaTableVoxelClutterGenerator:
         return self.target_surface_info
 
     def spawn_target_voxel(self, C: ry.Config):
-        """
-        Spawn the previously chosen target voxel into the scene.
-
-        Returns
-        -------
-        dict or None
-            Spawn metadata if successful, else None.
-        """
+        """Spawn the chosen target voxel into the scene."""
         if self.target_voxel_file is None:
             raise RuntimeError("Target voxel file has not been selected yet.")
 
@@ -1059,7 +750,7 @@ class PandaTableVoxelClutterGenerator:
         return obj
 
     # =========================================================
-    # Spawning
+    # Placement / spawning
     # =========================================================
     def _sample_noncolliding_xy(
         self,
@@ -1071,19 +762,8 @@ class PandaTableVoxelClutterGenerator:
     ):
         """
         Sample a random XY position for a rectangle of size size_xy such that:
-        - it lies fully inside the allowed region,
+        - it lies inside the allowed region,
         - it does not overlap already occupied rectangles.
-
-        Parameters
-        ----------
-        half_mode : None or str
-            Which table region to sample from.
-            If None, uses self.spawn_half_mode.
-
-        Returns
-        -------
-        (x, y, rect)
-            Center position and rectangle footprint.
         """
         xmin, xmax, ymin, ymax = self._spawn_region_bounds_xy(
             C,
@@ -1126,28 +806,17 @@ class PandaTableVoxelClutterGenerator:
 
     def _spawn_one_voxel(self, C: ry.Config, gfile: str, placed_rects):
         """
-        Spawn one voxel object into the scene:
-        - compute its rotated XY footprint,
-        - sample a valid non-overlapping XY position,
-        - place it above the table,
-        - enable physics and contact,
-        - store tracking info.
-
-        The XY placement is restricted to the selected table half if spawn_half_mode
-        is not None.
-
-        Returns
-        -------
-        dict or None
-            Spawn metadata if successful, None if no valid placement was found.
+        Spawn one voxel object:
+        - compute random rotation
+        - estimate rotated footprint
+        - sample collision-free XY
+        - place above table
+        - enable contact and mass
         """
         cubes = self._voxel_cube_geometry(gfile)
         local_min, _ = self._local_aabb(cubes)
 
-        # Random in-plane orientation
         theta = float(self.rng.uniform(0.0, 2.0 * np.pi))
-
-        # Compute footprint after applying this random rotation
         _, _, rot_size_xy = self._rotated_xy_aabb_size(cubes, theta)
 
         try:
@@ -1161,14 +830,11 @@ class PandaTableVoxelClutterGenerator:
             return None
 
         table_info = self._get_table_info(C)
-
-        # Place object above the table so it can fall under physics
         z = float(table_info["top_z"] - local_min[2] + self.spawn_height)
 
         prefix = f"obj{self.object_counter}_"
         self.object_counter += 1
 
-        # Add voxel frames into the real scene
         C.addFile(gfile, namePrefix=prefix)
 
         base = C.getFrame(f"{prefix}base")
@@ -1180,7 +846,6 @@ class PandaTableVoxelClutterGenerator:
         base.setPosition([x, y, z])
         base.setQuaternion(self._quat_from_z_rotation(theta))
 
-        # Enable contact and mass for each cube in this voxel object
         voxel_names = self._cube_frames(C, prefix)
         for nm in voxel_names:
             C.getFrame(nm).setContact(True)
@@ -1208,17 +873,7 @@ class PandaTableVoxelClutterGenerator:
     def spawn_voxels_best_effort(self, C: ry.Config, target_count):
         """
         Try to spawn up to target_count voxel objects.
-
-        Strategy:
-        - Prefer voxel files that have not been used yet.
-        - Exclude reserved files (e.g. target voxel file after it is specially used).
-        - Shuffle candidates for randomness.
-        - Try files one by one until enough objects are spawned or no more fits are found.
-
-        Returns
-        -------
-        list of dict
-            Spawn metadata for successfully spawned objects.
+        Prefer unused voxel files first for variety.
         """
         scene_rects = self._scene_occupied_rects(C)
         placed_rects = list(scene_rects)
@@ -1226,10 +881,9 @@ class PandaTableVoxelClutterGenerator:
         all_files = self._load_voxel_files()
         usable_files = [f for f in all_files if str(f) not in self.reserved_files]
 
-        # Prefer not-yet-used files first for variety
         unused_files = [f for f in usable_files if str(f) not in self.used_files]
-        used_files = [f for f in usable_files if str(f) in self.used_files]
-        candidate_files = unused_files + used_files
+        already_used_files = [f for f in usable_files if str(f) in self.used_files]
+        candidate_files = unused_files + already_used_files
 
         candidate_files = list(candidate_files)
         self.rng.shuffle(candidate_files)
@@ -1259,20 +913,10 @@ class PandaTableVoxelClutterGenerator:
         return spawned
 
     # =========================================================
-    # Simulation
+    # Physics simulation
     # =========================================================
     def run_physx(self, C: ry.Config, sim_seconds=7.0, sim_dt=0.01):
-        """
-        Run PhysX simulation for the current scene.
-
-        Parameters
-        ----------
-        sim_seconds : float
-            Total simulation duration.
-
-        sim_dt : float
-            Physics timestep.
-        """
+        """Run PhysX simulation for the current config."""
         S = ry.Simulation(C, ry.SimulationEngine.physx, verbose=0)
         S.pushConfigToSim()
 
@@ -1287,20 +931,11 @@ class PandaTableVoxelClutterGenerator:
     # =========================================================
     def _is_object_on_table(self, C: ry.Config, obj, xy_margin=0.01, z_tolerance=0.15):
         """
-        Check whether the object's base frame is still considered on the table.
-
-        Conditions:
-        - base XY lies inside the full table bounds (with optional margin),
-        - base z is not too far below the table top.
+        Check whether an object's base frame is still considered on the table.
 
         Note:
-        We intentionally check against the whole table, not only the selected half.
-        This means the half-table restriction is only used for spawning, not for
-        deciding whether a settled object counts as successfully remaining on the table.
-
-        Returns
-        -------
-        bool
+        This checks against the full table, not only the chosen spawn half.
+        So the half restriction is only for spawning, not for final validity.
         """
         prefix = obj["prefix"]
         base_name = f"{prefix}base"
@@ -1322,13 +957,8 @@ class PandaTableVoxelClutterGenerator:
 
     def find_objects_off_table(self, C: ry.Config, xy_margin=0.01, z_tolerance=0.15):
         """
-        Split currently alive spawned objects into:
-        - on_table
-        - off_table
-
-        Returns
-        -------
-        (on_table, off_table)
+        Split alive objects into on_table and off_table.
+        Returns (on_table, off_table).
         """
         off_table = []
         on_table = []
@@ -1345,22 +975,13 @@ class PandaTableVoxelClutterGenerator:
         return on_table, off_table
 
     def remove_objects(self, C: ry.Config, objects_to_remove):
-        """
-        Remove the frames belonging to the given objects from the scene
-        and mark them as no longer alive.
-
-        Parameters
-        ----------
-        objects_to_remove : list of dict
-            Objects previously returned by spawn logic.
-        """
+        """Delete all frames belonging to the given objects."""
         frame_names = set(C.getFrameNames())
 
         for obj in objects_to_remove:
             prefix = obj["prefix"]
             matching = [nm for nm in frame_names if nm.startswith(prefix)]
 
-            # Delete in reverse order for safety
             for nm in sorted(matching, reverse=True):
                 if nm in C.getFrameNames():
                     C.delFrame(nm)
@@ -1384,62 +1005,26 @@ class PandaTableVoxelClutterGenerator:
         """
         Main generation function.
 
-        Pipeline
-        --------
-        1. Load base scene and reset tracking.
-        2. Optionally choose a target voxel + stable side and place target marker.
-        3. Spawn the matching target voxel.
-        4. Spawn some initial clutter objects.
-        5. Repeatedly:
-           - simulate physics,
-           - remove off-table objects,
-           - spawn replacements,
-           until enough objects remain on the table or refill budget is exhausted.
-
-        Parameters
-        ----------
-        num_voxels : int
-            Desired final number of voxel objects on the table.
-
-        sim_seconds : float
-            Simulation duration per round.
-
-        sim_dt : float
-            Physics timestep.
-
-        max_refill_rounds : int
-            Maximum number of simulation/refill rounds.
-
-        xy_margin : float
-            Margin used when deciding whether objects are still on the table.
-
-        z_tolerance : float
-            Vertical tolerance for deciding whether an object has fallen off.
-
-        batch_spawn_count : int
-            Maximum number of objects to spawn in one refill batch.
-
-        add_target_surface : bool
-            Whether to place a target support marker and spawn the corresponding target voxel.
-
         Returns
         -------
         (C, summary)
             C : ry.Config
-                Final generated scene.
+                Final cleaned scene.
 
             summary : dict
-                Metadata about the generation process.
+                Metadata, including:
+                - target_voxel_file
+                - target_voxel_basename
+                - target_surface_frame_name
+                - target_surface_frame_names
         """
-        # Start from fresh base scene
         C = self._load_base_scene()
         self._reset_tracking()
 
-        # Tracks whether the target voxel was successfully spawned
         target_spawned = 0
 
         # -----------------------------------------------------
-        # Optional target-marker pipeline
+        # Target-marker pipeline
         # -----------------------------------------------------
         if add_target_surface:
             voxel_file, cubes, surface = self._choose_target_voxel_and_side()
@@ -1457,7 +1042,7 @@ class PandaTableVoxelClutterGenerator:
             if target_obj is not None:
                 target_spawned = 1
 
-                # Reserve target file so regular clutter spawning does not reuse it
+                # Reserve target file so clutter spawning does not reuse it
                 self.reserved_files.add(self.target_voxel_file)
 
                 print(f"Spawned target voxel: {target_obj['basename']}")
@@ -1474,8 +1059,7 @@ class PandaTableVoxelClutterGenerator:
         print(f"Initially spawned extra voxels: {len(initially_spawned)} / {initial_spawn_count}")
 
         # -----------------------------------------------------
-        # Refill loop:
-        # simulate -> remove fallen objects -> spawn replacements
+        # Refill loop
         # -----------------------------------------------------
         round_idx = 0
         while True:
@@ -1492,17 +1076,14 @@ class PandaTableVoxelClutterGenerator:
 
             print(f"On table: {len(on_table)} | Off table: {len(off_table)} | Target: {num_voxels}")
 
-            # Success condition
             if len(on_table) >= num_voxels:
                 print("Desired number of voxels is on the table.")
                 break
 
-            # Stop condition: too many rounds
             if round_idx >= max_refill_rounds:
                 print("Reached max refill rounds.")
                 break
 
-            # Remove failed objects before respawning
             if off_table:
                 self.remove_objects(C, off_table)
 
@@ -1513,12 +1094,26 @@ class PandaTableVoxelClutterGenerator:
             spawned_now = self.spawn_voxels_best_effort(C, to_spawn_now)
             print(f"Respawned {len(spawned_now)} voxel(s).")
 
-            # Stop early if no new object can be spawned
             if len(spawned_now) == 0:
                 print("Could not spawn any new voxel this round. Stopping early.")
                 break
 
-        # Final bookkeeping
+        # -----------------------------------------------------
+        # Final cleanup
+        # -----------------------------------------------------
+        # This is the key fix: even if the loop stops, the last scene may still
+        # contain off-table objects. We remove them before returning.
+        final_on, final_off = self.find_objects_off_table(
+            C,
+            xy_margin=xy_margin,
+            z_tolerance=z_tolerance,
+        )
+
+        if final_off:
+            print(f"Removing {len(final_off)} final off-table voxel(s) from returned config.")
+            self.remove_objects(C, final_off)
+
+        # Recompute after cleanup so summary matches the actual returned config
         final_on, final_off = self.find_objects_off_table(
             C,
             xy_margin=xy_margin,
@@ -1536,6 +1131,18 @@ class PandaTableVoxelClutterGenerator:
             "objects": self.spawned_objects,
             "target_surface": self.target_surface_info,
             "target_voxel_file": self.target_voxel_file,
+            "target_voxel_basename": (
+                os.path.basename(self.target_voxel_file)
+                if self.target_voxel_file is not None else None
+            ),
+            "target_surface_frame_name": (
+                self.target_surface_info["marker_frame_name"]
+                if self.target_surface_info is not None else None
+            ),
+            "target_surface_frame_names": (
+                self.target_surface_info["marker_tile_names"]
+                if self.target_surface_info is not None else []
+            ),
         }
 
         return C, summary
@@ -1544,25 +1151,9 @@ class PandaTableVoxelClutterGenerator:
     # Save
     # =========================================================
     def save_environment(self, C: ry.Config, file_name="generated_panda_table_voxel_clutter.g"):
-        """
-        Save the generated environment config to a .g file.
-
-        Parameters
-        ----------
-        C : ry.Config
-            Scene to save.
-
-        file_name : str
-            Name of the output .g file.
-
-        Returns
-        -------
-        str
-            Full saved file path.
-        """
+        """Save config C to a .g file and return the path."""
         out_file = self.output_dir / file_name
         with open(out_file, "w", encoding="utf-8") as f:
             f.write(C.write())
         print("Saved:", out_file)
         return str(out_file)
-
