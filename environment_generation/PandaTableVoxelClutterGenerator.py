@@ -23,6 +23,25 @@ class PandaTableVoxelClutterGenerator:
     instead of simply placing them in final positions directly.
 
     ----------------------------------------------------------------------
+    New feature: split-table generation
+    ----------------------------------------------------------------------
+    The generator supports restricting voxel spawning to only one half of the table.
+
+    Supported modes:
+    - None    : use the full table
+    - "front" : use the lower-y half of the table
+    - "back"  : use the upper-y half of the table
+    - "left"  : use the lower-x half of the table
+    - "right" : use the upper-x half of the table
+
+    Important:
+    - Actual voxel objects are spawned in the selected half.
+    - The 2D target-surface marker is placed in the opposite half.
+      For example:
+        * voxels in "left"  -> marker in "right"
+        * voxels in "front" -> marker in "back"
+
+    ----------------------------------------------------------------------
     How the generation pipeline works
     ----------------------------------------------------------------------
     The overall generation process is:
@@ -35,7 +54,8 @@ class PandaTableVoxelClutterGenerator:
        - A voxel file is chosen uniformly from those that have at least one stable resting face.
        - Then one stable face of that voxel is chosen uniformly.
        - A marker is placed on the table with the same footprint and colors as that support face.
-       - Then that same voxel is spawned somewhere in the clutter.
+       - That marker is placed on the opposite half of the table.
+       - Then that same voxel is spawned somewhere in the clutter half.
 
     3. Spawn some additional voxel objects
        - Objects are spawned above the table with random XY location and random Z rotation.
@@ -60,7 +80,7 @@ class PandaTableVoxelClutterGenerator:
     If we only spawn all objects once, many of them may:
     - collide badly during falling,
     - get pushed off the table,
-    - land outside the valid table area,
+    - land outside the valid region,
     - or create overly unstable clutter.
 
     Because of that, a single spawn pass often does not leave the desired number
@@ -131,6 +151,15 @@ class PandaTableVoxelClutterGenerator:
 
     marker_thickness : float
         Thickness of the thin target-surface tiles placed on the table.
+
+    spawn_half_mode : None or str
+        Restrict voxel spawning to one half of the table.
+        Allowed values:
+        - None
+        - "front"
+        - "back"
+        - "left"
+        - "right"
     """
 
     def __init__(
@@ -146,6 +175,7 @@ class PandaTableVoxelClutterGenerator:
         table_shape_size=(1.6, 1.6, 0.08, 0.02),
         panda_base_relative_pos=(0.0, 0.0, 0.05),
         marker_thickness=0.004,
+        spawn_half_mode=None,  # None, "front", "back", "left", "right"
     ):
         # Path to the base Panda+table scene
         self.base_scene_file = Path(base_scene_file)
@@ -180,6 +210,14 @@ class PandaTableVoxelClutterGenerator:
 
         # Thickness of target-surface marker tiles placed on the table
         self.marker_thickness = float(marker_thickness)
+
+        # Restrict spawning to one half of the table if requested
+        valid_modes = {None, "front", "back", "left", "right"}
+        if spawn_half_mode not in valid_modes:
+            raise ValueError(
+                f"spawn_half_mode must be one of {valid_modes}, got: {spawn_half_mode}"
+            )
+        self.spawn_half_mode = spawn_half_mode
 
         # Make sure the base scene exists
         if not self.base_scene_file.exists():
@@ -319,7 +357,7 @@ class PandaTableVoxelClutterGenerator:
 
     def _table_bounds_xy(self, C: ry.Config, margin=0.0):
         """
-        Compute the valid XY bounds of the table.
+        Compute the valid XY bounds of the full table.
 
         Parameters
         ----------
@@ -339,6 +377,77 @@ class PandaTableVoxelClutterGenerator:
         ymin = py - ty / 2.0 + margin
         ymax = py + ty / 2.0 - margin
         return xmin, xmax, ymin, ymax
+
+    def _opposite_half_mode(self, half_mode):
+        """
+        Return the opposite half-table mode.
+
+        Mapping
+        -------
+        - front <-> back
+        - left  <-> right
+        - None  -> None
+        """
+        if half_mode is None:
+            return None
+        if half_mode == "front":
+            return "back"
+        if half_mode == "back":
+            return "front"
+        if half_mode == "left":
+            return "right"
+        if half_mode == "right":
+            return "left"
+        raise ValueError(f"Unknown half mode: {half_mode}")
+
+    def _spawn_region_bounds_xy(self, C: ry.Config, margin=0.0, half_mode=None):
+        """
+        Return the XY bounds of the allowed placement region.
+
+        If half_mode is None, use self.spawn_half_mode.
+        If the resolved mode is still None, the full table is used.
+
+        Supported modes:
+        - None
+        - "front": lower-y half
+        - "back" : upper-y half
+        - "left" : lower-x half
+        - "right": upper-x half
+
+        Parameters
+        ----------
+        margin : float
+            Optional inward margin to shrink the region.
+
+        half_mode : None or str
+            Optional override for which half to use.
+
+        Returns
+        -------
+        (xmin, xmax, ymin, ymax)
+            Bounds of the active region.
+        """
+        xmin, xmax, ymin, ymax = self._table_bounds_xy(C, margin=margin)
+
+        if half_mode is None:
+            half_mode = self.spawn_half_mode
+
+        if half_mode is None:
+            return xmin, xmax, ymin, ymax
+
+        xmid = 0.5 * (xmin + xmax)
+        ymid = 0.5 * (ymin + ymax)
+
+        if half_mode == "front":
+            return xmin, xmax, ymin, ymid
+        elif half_mode == "back":
+            return xmin, xmax, ymid, ymax
+        elif half_mode == "left":
+            return xmin, xmid, ymin, ymax
+        elif half_mode == "right":
+            return xmid, xmax, ymin, ymax
+        else:
+            raise ValueError(f"Unknown half mode: {half_mode}")
 
     def _voxel_cube_geometry(self, file_path: str):
         """
@@ -809,8 +918,8 @@ class PandaTableVoxelClutterGenerator:
     # New target selection order:
     # 1) choose voxel uniformly from eligible voxels
     # 2) choose one stable side uniformly
-    # 3) place sticker
-    # 4) spawn same voxel
+    # 3) place sticker on opposite half
+    # 4) spawn same voxel in clutter half
     # 5) fill clutter
     # =========================================================
     def _choose_target_voxel_and_side(self):
@@ -856,10 +965,9 @@ class PandaTableVoxelClutterGenerator:
         The marker is composed of one thin tile per touching support cube.
         These tiles preserve the footprint and color structure of the chosen face.
 
-        Returns
-        -------
-        dict
-            Metadata about the placed target surface marker.
+        Important:
+        - Voxels spawn in self.spawn_half_mode.
+        - The target surface marker is placed in the opposite half.
         """
         if self.target_voxel_file is None or self.target_surface_choice is None:
             raise RuntimeError("Target voxel/side has not been chosen yet.")
@@ -870,9 +978,17 @@ class PandaTableVoxelClutterGenerator:
         # Marker size in XY is the bounding box of the chosen support face
         size_xy = surface["bbox_size_2d"]
 
+        # Place marker in the opposite half of the voxel spawn region
+        marker_half_mode = self._opposite_half_mode(self.spawn_half_mode)
+
         # Avoid placing marker on top of already occupied regions
         placed_rects = self._scene_occupied_rects(C)
-        cx, cy, rect = self._sample_noncolliding_xy(C, size_xy, placed_rects)
+        cx, cy, rect = self._sample_noncolliding_xy(
+            C,
+            size_xy,
+            placed_rects,
+            half_mode=marker_half_mode,
+        )
 
         table_info = self._get_table_info(C)
 
@@ -920,6 +1036,8 @@ class PandaTableVoxelClutterGenerator:
             "support_bbox_size_2d": surface["bbox_size_2d"].tolist(),
             "com_local": surface["com"].tolist(),
             "com_proj_local": surface["com_proj"].tolist(),
+            "spawn_half_mode": self.spawn_half_mode,
+            "marker_half_mode": marker_half_mode,
         }
 
         return self.target_surface_info
@@ -943,18 +1061,35 @@ class PandaTableVoxelClutterGenerator:
     # =========================================================
     # Spawning
     # =========================================================
-    def _sample_noncolliding_xy(self, C: ry.Config, size_xy, placed_rects, max_tries=3000):
+    def _sample_noncolliding_xy(
+        self,
+        C: ry.Config,
+        size_xy,
+        placed_rects,
+        max_tries=3000,
+        half_mode=None,
+    ):
         """
         Sample a random XY position for a rectangle of size size_xy such that:
-        - it lies fully inside the table bounds,
+        - it lies fully inside the allowed region,
         - it does not overlap already occupied rectangles.
+
+        Parameters
+        ----------
+        half_mode : None or str
+            Which table region to sample from.
+            If None, uses self.spawn_half_mode.
 
         Returns
         -------
         (x, y, rect)
             Center position and rectangle footprint.
         """
-        xmin, xmax, ymin, ymax = self._table_bounds_xy(C, margin=0.0)
+        xmin, xmax, ymin, ymax = self._spawn_region_bounds_xy(
+            C,
+            margin=0.0,
+            half_mode=half_mode,
+        )
 
         half_x = size_xy[0] / 2.0
         half_y = size_xy[1] / 2.0
@@ -964,8 +1099,13 @@ class PandaTableVoxelClutterGenerator:
         y_min = ymin + half_y + self.gap
         y_max = ymax - half_y - self.gap
 
+        resolved_half_mode = half_mode if half_mode is not None else self.spawn_half_mode
+
         if x_min > x_max or y_min > y_max:
-            raise ValueError("Table too small for one of the rotated voxels.")
+            raise ValueError(
+                f"Allowed region too small for an object of size {size_xy} "
+                f"under mode '{resolved_half_mode}'."
+            )
 
         for _ in range(max_tries):
             x = float(self.rng.uniform(x_min, x_max))
@@ -979,7 +1119,10 @@ class PandaTableVoxelClutterGenerator:
             if not collides:
                 return x, y, rect
 
-        raise RuntimeError("Could not find non-colliding spawn position.")
+        raise RuntimeError(
+            "Could not find non-colliding position "
+            f"in half_mode={resolved_half_mode}."
+        )
 
     def _spawn_one_voxel(self, C: ry.Config, gfile: str, placed_rects):
         """
@@ -989,6 +1132,9 @@ class PandaTableVoxelClutterGenerator:
         - place it above the table,
         - enable physics and contact,
         - store tracking info.
+
+        The XY placement is restricted to the selected table half if spawn_half_mode
+        is not None.
 
         Returns
         -------
@@ -1005,7 +1151,12 @@ class PandaTableVoxelClutterGenerator:
         _, _, rot_size_xy = self._rotated_xy_aabb_size(cubes, theta)
 
         try:
-            x, y, rect = self._sample_noncolliding_xy(C, rot_size_xy, placed_rects)
+            x, y, rect = self._sample_noncolliding_xy(
+                C,
+                rot_size_xy,
+                placed_rects,
+                half_mode=self.spawn_half_mode,
+            )
         except RuntimeError:
             return None
 
@@ -1045,6 +1196,7 @@ class PandaTableVoxelClutterGenerator:
             "theta_deg": float(np.degrees(theta)),
             "spawn_rect": rect,
             "alive": True,
+            "spawn_half_mode": self.spawn_half_mode,
         }
 
         self.spawned_objects.append(obj_info)
@@ -1138,8 +1290,13 @@ class PandaTableVoxelClutterGenerator:
         Check whether the object's base frame is still considered on the table.
 
         Conditions:
-        - base XY lies inside the table bounds (with optional margin),
+        - base XY lies inside the full table bounds (with optional margin),
         - base z is not too far below the table top.
+
+        Note:
+        We intentionally check against the whole table, not only the selected half.
+        This means the half-table restriction is only used for spawning, not for
+        deciding whether a settled object counts as successfully remaining on the table.
 
         Returns
         -------
@@ -1289,6 +1446,8 @@ class PandaTableVoxelClutterGenerator:
 
             print("Chosen target voxel:", os.path.basename(voxel_file))
             print("Chosen target side:", surface["side_name"])
+            print("Voxel spawn half mode:", self.spawn_half_mode)
+            print("Marker half mode:", self._opposite_half_mode(self.spawn_half_mode))
 
             surface_info = self._place_target_surface_marker(C)
             print("Placed target surface:")
@@ -1372,6 +1531,8 @@ class PandaTableVoxelClutterGenerator:
             "final_off_table": len(final_off),
             "rounds": round_idx,
             "batch_spawn_count": batch_spawn_count,
+            "spawn_half_mode": self.spawn_half_mode,
+            "marker_half_mode": self._opposite_half_mode(self.spawn_half_mode),
             "objects": self.spawned_objects,
             "target_surface": self.target_surface_info,
             "target_voxel_file": self.target_voxel_file,
@@ -1404,3 +1565,4 @@ class PandaTableVoxelClutterGenerator:
             f.write(C.write())
         print("Saved:", out_file)
         return str(out_file)
+
