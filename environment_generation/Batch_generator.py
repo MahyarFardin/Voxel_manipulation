@@ -1,5 +1,6 @@
 from PandaTableVoxelClutterGenerator import PandaTableVoxelClutterGenerator
 import robotic as ry
+import numpy as np
 from tqdm import tqdm
 
 def get_img(C:ry.Config, camera_view:ry.CameraView=None, cam_f:str="cam0"):
