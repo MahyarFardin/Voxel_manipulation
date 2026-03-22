@@ -41,7 +41,7 @@ def main(idx):
     # ------------------------------------------------------------
     generator = PandaTableVoxelClutterGenerator(
         base_scene_file=ry.raiPath("../rai-robotModels/scenarios/pandaSingle.g"),
-        voxel_dir="../../voxel_generation/data/",   # folder containing voxel .g files
+        voxel_dir="../voxel_generation/data/",   # folder containing voxel .g files
         output_dir="./generated_envs",
         table_frame_name="table",
         gap=0.04,
@@ -86,8 +86,8 @@ def main(idx):
         image_list.append(t[0])
         depth_list.append(t[1])
         
-    np.save(f"./image_{idx}.npy", np.array(image_list))
-    np.save(f"./depth_{idx}.npy", np.array(depth_list))
+    np.save(f"./generated_envs/image_{idx}.npy", np.array(image_list))
+    np.save(f"./generated_envs/depth_{idx}.npy", np.array(depth_list))
 
     saved_path = generator.save_environment(
         C,
