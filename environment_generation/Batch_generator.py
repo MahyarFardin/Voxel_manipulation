@@ -36,36 +36,34 @@ def remove_panda(C):
             C.delFrame(frame)
 
 def main(idx):
-    # ------------------------------------------------------------
-    # Create the generator
-    # ------------------------------------------------------------
     generator = PandaTableVoxelClutterGenerator(
-        base_scene_file=ry.raiPath("../rai-robotModels/scenarios/pandaSingle.g"),
-        voxel_dir="../voxel_generation/data/",   # folder containing voxel .g files
-        output_dir="./generated_envs",
-        table_frame_name="table",
-        gap=0.04,
-        spawn_height=0.55,
-        seed=14,
-        per_cube_mass=0.2,
-        table_shape_size=(1.6, 1.6, 0.08, 0.02),
-        panda_base_relative_pos=(0.0, 0.0, 0.05),
-        marker_thickness=0.004,
-        spawn_half_mode="back",   # None, "left", "right", "front", "back"
+        base_scene_file=ry.raiPath("../rai-robotModels/scenarios/pandaSingle.g"),  
+        voxel_dir="../voxel_generation/data/",                                    
+        output_dir="./generated_envs",                                            
+        table_frame_name="table",                                                 
+        gap=0.04,                                                                
+        spawn_height=0.55,                                                        
+        seed=14,                                                                   
+        per_cube_mass=0.2,                                                        
+        table_shape_size=(1.6, 1.6, 0.08, 0.02),                                 
+        panda_base_relative_pos=(0.0, 0.0, 0.05),                                 
+        target_alpha=0.35,                                                         
+        target_center_jitter_ratio=0.10,                                           
+        clutter_mode="high_clutter",                                               
+        placement_candidate_count=128,                                             
     )
 
     # ------------------------------------------------------------
     # Generate one environment
     # ------------------------------------------------------------
     C, summary = generator.create_environment_with_refill(
-        num_voxels=int(np.random.normal(10, 4)),
-        sim_seconds=10.0,
-        sim_dt=0.01,
-        max_refill_rounds=10,
-        xy_margin=0.02,
-        z_tolerance=0.15,
-        batch_spawn_count=5,
-        add_target_surface=True,
+        num_voxels=max(1, int(np.random.normal(10, 4))),  
+        sim_seconds=10.0,                                
+        sim_dt=0.01,                                 
+        max_refill_rounds=10,                         
+        xy_margin=0.02,                                
+        z_tolerance=0.15,                              
+        batch_spawn_count=5,             
     )
 
     remove_panda(C)

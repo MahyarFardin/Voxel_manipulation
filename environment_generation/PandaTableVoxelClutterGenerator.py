@@ -8,88 +8,23 @@ import robotic as ry
 
 class PandaTableVoxelClutterGenerator:
     """
-    PandaTableVoxelClutterGenerator
-    ===============================
+    Generates Panda-table voxel scenes with these rules:
 
-    This class generates cluttered Panda-table scenes containing:
-    1. A Panda robot and table loaded from a base RAI scene.
-    2. Multiple voxel objects loaded from pre-generated voxel .g files.
-    3. Optionally, a thin 2D marker ("shadow"/target surface) placed on the
-       opposite half of the table, representing one stable resting face of a
-       chosen target voxel.
+    1. One target voxel is chosen in advance.
+    2. One random table quarter is assigned to that target.
+    3. All non-target voxels are spawned only in the other three quarters.
+    4. Non-target voxels are simulated/refilled first.
+    5. The target is spawned last.
+    6. The target is spawned near the center of its assigned quarter.
+    7. The target quarter is NOT checked for emptiness during target insertion.
+    8. The target must survive simulation and remain on the table.
+    9. The target is loaded with a frame prefix starting with 'goal_'.
+    10. The alpha channel of all target cubes is changed while preserving RGB.
 
-    Main pipeline
-    -------------
-    1. Load base scene.
-    2. Optionally choose a target voxel and one stable resting face.
-    3. Place a 2D marker of that face on the opposite half of the table.
-    4. Spawn the matching target voxel into the clutter half.
-    5. Spawn extra clutter voxels above the table.
-    6. Simulate physics so objects settle.
-    7. Remove objects that fell off / are invalid.
-    8. Refill missing ones and repeat.
-    9. Before returning, remove any final remaining off-table voxels so the
-       returned config matches what "final_on_table" says.
-
-    Important fixes in this version
-    -------------------------------
-    - Final off-table objects are removed before returning.
-      So you should no longer see extra voxels on the ground in the final config.
-    - The target voxel file name and the target 2D marker parent frame name are
-      returned in the summary.
-    - The 2D target marker is now created under a single parent frame:
-          targetSurface
-      and its colored tiles are children of that frame.
-
-    Split-table generation
-    ----------------------
-    Supported spawn_half_mode values:
-    - None
-    - "front" : lower-y half
-    - "back"  : upper-y half
-    - "left"  : lower-x half
-    - "right" : upper-x half
-
-    Voxels spawn in the chosen half, while the target marker is placed in the
-    opposite half.
-
-    Parameters
-    ----------
-    base_scene_file : str or Path
-        Path to the base Panda/table scene.
-
-    voxel_dir : str or Path
-        Folder containing voxel .g files.
-
-    output_dir : str or Path
-        Folder where generated environments can be saved.
-
-    table_frame_name : str
-        Name of the table frame in the scene.
-
-    gap : float
-        Extra spacing margin used during XY placement.
-
-    spawn_height : float
-        Height above the table from which objects are dropped.
-
-    seed : int
-        Random seed.
-
-    per_cube_mass : float
-        Mass assigned to each cube of a voxel object.
-
-    table_shape_size : tuple
-        Replacement table size: (x_size, y_size, z_size, rounding).
-
-    panda_base_relative_pos : tuple
-        Relative position for frame 'l_panda_base'.
-
-    marker_thickness : float
-        Thickness of the 2D target marker tiles.
-
-    spawn_half_mode : None or str
-        Restrict spawning to one half of the table.
+    Non-target clutter placement modes:
+    - "random": purely random inside the 3 allowed quarters, no clutter overlap check
+    - "low_clutter": best-effort spread-out placement, prefers non-collision and open areas
+    - "high_clutter": prefers placement close to existing clutter, creating dense clusters
     """
 
     def __init__(
@@ -104,8 +39,10 @@ class PandaTableVoxelClutterGenerator:
         per_cube_mass=0.2,
         table_shape_size=(1.6, 1.6, 0.08, 0.02),
         panda_base_relative_pos=(0.0, 0.0, 0.05),
-        marker_thickness=0.004,
-        spawn_half_mode=None,
+        target_alpha=0.35,
+        target_center_jitter_ratio=0.10,
+        clutter_mode="random",
+        placement_candidate_count=96,
     ):
         self.base_scene_file = Path(base_scene_file)
         self.voxel_dir = Path(voxel_dir)
@@ -117,57 +54,50 @@ class PandaTableVoxelClutterGenerator:
         self.per_cube_mass = float(per_cube_mass)
         self.table_shape_size = list(table_shape_size)
         self.panda_base_relative_pos = list(panda_base_relative_pos)
-        self.marker_thickness = float(marker_thickness)
+        self.target_alpha = float(target_alpha)
+        self.target_center_jitter_ratio = float(target_center_jitter_ratio)
 
-        valid_modes = {None, "front", "back", "left", "right"}
-        if spawn_half_mode not in valid_modes:
+        self.clutter_mode = str(clutter_mode)
+        self.placement_candidate_count = int(placement_candidate_count)
+
+        allowed_modes = {"random", "low_clutter", "high_clutter"}
+        if self.clutter_mode not in allowed_modes:
             raise ValueError(
-                f"spawn_half_mode must be one of {valid_modes}, got: {spawn_half_mode}"
+                f"Unknown clutter_mode: {self.clutter_mode}. "
+                f"Allowed: {sorted(allowed_modes)}"
             )
-        self.spawn_half_mode = spawn_half_mode
 
         if not self.base_scene_file.exists():
             raise FileNotFoundError(f"Base scene file not found: {self.base_scene_file}")
 
         self.output_dir.mkdir(parents=True, exist_ok=True)
-
         self.rng = np.random.default_rng(self.seed)
 
-        # Tracking for current environment generation
         self.spawned_objects = []
         self.used_files = set()
         self.reserved_files = set()
         self.object_counter = 0
-        self.static_rects = []
 
-        self.target_surface_info = None
         self.target_voxel_file = None
-        self.target_surface_choice = None
+        self.target_quarter_mode = None
+        self.target_object_prefix = None
 
     # =========================================================
     # Basic helpers
     # =========================================================
     def _cube_frames(self, C: ry.Config, prefix: str):
-        """Return all cube frame names starting with the given prefix."""
         return [n for n in C.getFrameNames() if n.startswith(prefix) and "cube" in n]
 
     def _quat_from_z_rotation(self, theta: float):
-        """Quaternion [w, x, y, z] for pure z-axis rotation."""
         return [float(np.cos(theta / 2.0)), 0.0, 0.0, float(np.sin(theta / 2.0))]
 
     def _load_voxel_files(self):
-        """Load all voxel .g files from the voxel directory."""
         voxel_files = sorted(glob(str(self.voxel_dir / "*.g")))
         if not voxel_files:
             raise FileNotFoundError(f"No voxel files found in: {self.voxel_dir}")
         return voxel_files
 
     def _load_base_scene(self):
-        """
-        Load the Panda/table base scene and apply:
-        - table geometry override
-        - Panda base relative position override
-        """
         C = ry.Config()
         C.addFile(str(self.base_scene_file))
 
@@ -179,7 +109,7 @@ class PandaTableVoxelClutterGenerator:
 
         C.getFrame(self.table_frame_name).setShape(
             ry.ST.ssBox,
-            self.table_shape_size
+            self.table_shape_size,
         )
 
         C.getFrame("l_panda_base").setRelativePosition(
@@ -189,21 +119,12 @@ class PandaTableVoxelClutterGenerator:
         return C
 
     # =========================================================
-    # Scene geometry
+    # Geometry
     # =========================================================
     def _get_table_info(self, C: ry.Config):
-        """Return table frame, center, size, and top z."""
-        if self.table_frame_name not in C.getFrameNames():
-            raise ValueError(f"Table frame '{self.table_frame_name}' not found in scene.")
-
         table = C.getFrame(self.table_frame_name)
         table_pos = np.array(table.getPosition(), dtype=float)
         table_size = np.array(table.getSize(), dtype=float)
-
-        if len(table_size) < 3:
-            raise ValueError(
-                f"Table frame '{self.table_frame_name}' does not have a valid box size."
-            )
 
         tx, ty, tz = float(table_size[0]), float(table_size[1]), float(table_size[2])
         px, py, pz = float(table_pos[0]), float(table_pos[1]), float(table_pos[2])
@@ -216,7 +137,6 @@ class PandaTableVoxelClutterGenerator:
         }
 
     def _table_bounds_xy(self, C: ry.Config, margin=0.0):
-        """Return full table XY bounds as (xmin, xmax, ymin, ymax)."""
         info = self._get_table_info(C)
         tx, ty, _ = info["size"]
         px, py, _ = info["pos"]
@@ -227,55 +147,38 @@ class PandaTableVoxelClutterGenerator:
         ymax = py + ty / 2.0 - margin
         return xmin, xmax, ymin, ymax
 
-    def _opposite_half_mode(self, half_mode):
-        """Return opposite split-table mode."""
-        if half_mode is None:
-            return None
-        if half_mode == "front":
-            return "back"
-        if half_mode == "back":
-            return "front"
-        if half_mode == "left":
-            return "right"
-        if half_mode == "right":
-            return "left"
-        raise ValueError(f"Unknown half mode: {half_mode}")
+    def _quarter_modes(self):
+        return ["front_left", "front_right", "back_left", "back_right"]
 
-    def _spawn_region_bounds_xy(self, C: ry.Config, margin=0.0, half_mode=None):
-        """
-        Return XY bounds of the active placement region.
-        If half_mode is None, self.spawn_half_mode is used.
-        """
+    def _quarter_bounds_xy(self, C: ry.Config, margin=0.0, quarter_mode=None):
         xmin, xmax, ymin, ymax = self._table_bounds_xy(C, margin=margin)
-
-        if half_mode is None:
-            half_mode = self.spawn_half_mode
-
-        if half_mode is None:
-            return xmin, xmax, ymin, ymax
-
         xmid = 0.5 * (xmin + xmax)
         ymid = 0.5 * (ymin + ymax)
 
-        if half_mode == "front":
-            return xmin, xmax, ymin, ymid
-        if half_mode == "back":
-            return xmin, xmax, ymid, ymax
-        if half_mode == "left":
-            return xmin, xmid, ymin, ymax
-        if half_mode == "right":
-            return xmid, xmax, ymin, ymax
+        if quarter_mode == "front_left":
+            return xmin, xmid, ymin, ymid
+        if quarter_mode == "front_right":
+            return xmid, xmax, ymin, ymid
+        if quarter_mode == "back_left":
+            return xmin, xmid, ymid, ymax
+        if quarter_mode == "back_right":
+            return xmid, xmax, ymid, ymax
 
-        raise ValueError(f"Unknown half mode: {half_mode}")
+        raise ValueError(f"Unknown quarter_mode: {quarter_mode}")
 
+    def _quarter_center_xy(self, C: ry.Config, quarter_mode):
+        xmin, xmax, ymin, ymax = self._quarter_bounds_xy(
+            C, margin=0.0, quarter_mode=quarter_mode
+        )
+        return np.array([(xmin + xmax) * 0.5, (ymin + ymax) * 0.5], dtype=float)
+
+    def _complement_quarters(self, target_quarter):
+        return [q for q in self._quarter_modes() if q != target_quarter]
+
+    # =========================================================
+    # Voxel geometry
+    # =========================================================
     def _voxel_cube_geometry(self, file_path: str):
-        """
-        Load a voxel file temporarily and extract per-cube local geometry:
-        - name
-        - local position
-        - size
-        - color
-        """
         T = ry.Config()
         T.addFile(file_path, namePrefix="tmp_")
 
@@ -314,7 +217,6 @@ class PandaTableVoxelClutterGenerator:
         return cubes
 
     def _local_aabb(self, cubes):
-        """Compute local 3D AABB of a voxel from its cubes."""
         min_corner = np.array([np.inf, np.inf, np.inf], dtype=float)
         max_corner = np.array([-np.inf, -np.inf, -np.inf], dtype=float)
 
@@ -327,10 +229,6 @@ class PandaTableVoxelClutterGenerator:
         return min_corner, max_corner
 
     def _rotated_xy_aabb_size(self, cubes, theta: float):
-        """
-        Compute the rotated XY AABB of a voxel after z rotation by theta.
-        Returns (min_xy, max_xy, size_xy).
-        """
         c = np.cos(theta)
         s = np.sin(theta)
         R = np.array([[c, -s], [s, c]], dtype=float)
@@ -357,7 +255,6 @@ class PandaTableVoxelClutterGenerator:
         return min_xy, max_xy, (max_xy - min_xy)
 
     def _rectangles_overlap(self, rect1, rect2, extra_gap=0.0):
-        """Check overlap of two axis-aligned XY rectangles."""
         x1_min, x1_max, y1_min, y1_max = rect1
         x2_min, x2_max, y2_min, y2_max = rect2
 
@@ -368,193 +265,28 @@ class PandaTableVoxelClutterGenerator:
             y2_max + extra_gap <= y1_min
         )
 
-    # =========================================================
-    # 2D stability helpers
-    # =========================================================
-    def _cross2d(self, o, a, b):
-        """Signed 2D cross product used in convex hull tests."""
-        return (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0])
+    def _rect_center(self, rect):
+        x_min, x_max, y_min, y_max = rect
+        return np.array([(x_min + x_max) * 0.5, (y_min + y_max) * 0.5], dtype=float)
 
-    def _convex_hull_2d(self, points):
-        """Monotonic-chain convex hull."""
-        pts = sorted(set((float(p[0]), float(p[1])) for p in points))
-        if len(pts) <= 1:
-            return pts
+    def _rect_clearance(self, rect1, rect2):
+        x1_min, x1_max, y1_min, y1_max = rect1
+        x2_min, x2_max, y2_min, y2_max = rect2
 
-        lower = []
-        for p in pts:
-            while len(lower) >= 2 and self._cross2d(lower[-2], lower[-1], p) <= 1e-12:
-                lower.pop()
-            lower.append(p)
+        dx = max(0.0, x2_min - x1_max, x1_min - x2_max)
+        dy = max(0.0, y2_min - y1_max, y1_min - y2_max)
+        return float(np.hypot(dx, dy))
 
-        upper = []
-        for p in reversed(pts):
-            while len(upper) >= 2 and self._cross2d(upper[-2], upper[-1], p) <= 1e-12:
-                upper.pop()
-            upper.append(p)
-
-        return lower[:-1] + upper[:-1]
-
-    def _point_on_segment_2d(self, p, a, b, tol=1e-9):
-        """Check if p lies on segment a-b."""
-        ap = np.array(p) - np.array(a)
-        ab = np.array(b) - np.array(a)
-        cross = abs(ab[0] * ap[1] - ab[1] * ap[0])
-        if cross > tol:
-            return False
-        dot = np.dot(ap, ab)
-        if dot < -tol:
-            return False
-        if dot > np.dot(ab, ab) + tol:
-            return False
-        return True
-
-    def _point_in_convex_polygon_2d(self, p, poly, tol=1e-9):
-        """Check if point p is inside or on a convex polygon."""
-        if len(poly) == 0:
-            return False
-        if len(poly) == 1:
-            return np.linalg.norm(np.array(p) - np.array(poly[0])) <= tol
-        if len(poly) == 2:
-            return self._point_on_segment_2d(p, poly[0], poly[1], tol=tol)
-
-        sign = None
-        for i in range(len(poly)):
-            a = np.array(poly[i], dtype=float)
-            b = np.array(poly[(i + 1) % len(poly)], dtype=float)
-            c = self._cross2d(a, b, p)
-
-            if abs(c) <= tol:
-                continue
-
-            current = c > 0
-            if sign is None:
-                sign = current
-            elif sign != current:
-                return False
-
-        return True
+    def _count_overlaps(self, rect, rects, extra_gap=0.0):
+        return sum(
+            1 for other in rects
+            if self._rectangles_overlap(rect, other, extra_gap=extra_gap)
+        )
 
     # =========================================================
-    # Stable resting-surface analysis
-    # =========================================================
-    def _cube_com(self, cubes):
-        """Approximate center of mass by volume-weighted cube centers."""
-        masses = []
-        centers = []
-
-        for cube in cubes:
-            size = cube["size"]
-            volume = float(size[0] * size[1] * size[2])
-            masses.append(volume)
-            centers.append(cube["pos"])
-
-        masses = np.array(masses, dtype=float)
-        centers = np.array(centers, dtype=float)
-
-        total_mass = masses.sum()
-        if total_mass <= 0:
-            return centers.mean(axis=0)
-
-        return (centers * masses[:, None]).sum(axis=0) / total_mass
-
-    def _resting_surface_info(self, cubes, axis, use_max_side, tol=1e-8):
-        """
-        Analyze one candidate support face and determine if it is stable.
-        A face is stable if the COM projection lies inside the support hull.
-        """
-        other_axes = [ax for ax in [0, 1, 2] if ax != axis]
-
-        if use_max_side:
-            plane_val = max(c["pos"][axis] + c["size"][axis] / 2.0 for c in cubes)
-            touching = [
-                c for c in cubes
-                if abs((c["pos"][axis] + c["size"][axis] / 2.0) - plane_val) <= tol
-            ]
-            side_name = f"+{'xyz'[axis]}"
-        else:
-            plane_val = min(c["pos"][axis] - c["size"][axis] / 2.0 for c in cubes)
-            touching = [
-                c for c in cubes
-                if abs((c["pos"][axis] - c["size"][axis] / 2.0) - plane_val) <= tol
-            ]
-            side_name = f"-{'xyz'[axis]}"
-
-        if len(touching) == 0:
-            return None
-
-        support_rects = []
-        corners = []
-        min_xy = np.array([np.inf, np.inf], dtype=float)
-        max_xy = np.array([-np.inf, -np.inf], dtype=float)
-
-        for cube in touching:
-            center_2d = cube["pos"][other_axes]
-            size_2d = cube["size"][other_axes]
-            half_2d = size_2d / 2.0
-
-            lo = center_2d - half_2d
-            hi = center_2d + half_2d
-
-            support_rects.append({
-                "center_2d": center_2d.copy(),
-                "size_2d": size_2d.copy(),
-                "lo": lo.copy(),
-                "hi": hi.copy(),
-                "color": list(cube["color"]),
-                "source_cube_name": cube["name"],
-            })
-
-            min_xy = np.minimum(min_xy, lo)
-            max_xy = np.maximum(max_xy, hi)
-
-            corners.extend([
-                (lo[0], lo[1]),
-                (lo[0], hi[1]),
-                (hi[0], lo[1]),
-                (hi[0], hi[1]),
-            ])
-
-        hull = self._convex_hull_2d(corners)
-        com = self._cube_com(cubes)
-        com_proj = com[other_axes]
-        stable = self._point_in_convex_polygon_2d(com_proj, hull, tol=1e-8)
-
-        return {
-            "axis": axis,
-            "use_max_side": use_max_side,
-            "side_name": side_name,
-            "other_axes": other_axes,
-            "plane_val": float(plane_val),
-            "touching_cubes": touching,
-            "support_rects": support_rects,
-            "support_hull": hull,
-            "com": com,
-            "com_proj": com_proj,
-            "stable": bool(stable),
-            "bbox_min_2d": min_xy,
-            "bbox_max_2d": max_xy,
-            "bbox_size_2d": max_xy - min_xy,
-        }
-
-    def _stable_resting_surfaces(self, cubes):
-        """Return all stable axis-aligned outer support faces."""
-        surfaces = []
-        for axis in [0, 1, 2]:
-            for use_max_side in [False, True]:
-                info = self._resting_surface_info(cubes, axis, use_max_side)
-                if info is not None and info["stable"]:
-                    surfaces.append(info)
-        return surfaces
-
-    # =========================================================
-    # Occupancy helpers
+    # Occupancy
     # =========================================================
     def _frame_xy_rect(self, fr):
-        """
-        Approximate a frame by an XY rectangle using its size and position.
-        Returns None if no meaningful size exists.
-        """
         try:
             size = np.array(fr.getSize(), dtype=float)
             pos = np.array(fr.getPosition(), dtype=float)
@@ -574,25 +306,15 @@ class PandaTableVoxelClutterGenerator:
         return (x - sx / 2.0, x + sx / 2.0, y - sy / 2.0, y + sy / 2.0)
 
     def _scene_occupied_rects(self, C: ry.Config):
-        """
-        Collect XY rectangles already occupying table space.
-
-        Excluded:
-        - spawned voxel frames (obj*)
-        - the table itself
-        - target surface parent and tiles
-        """
         rects = []
         names = C.getFrameNames()
 
         xmin, xmax, ymin, ymax = self._table_bounds_xy(C, margin=0.0)
 
         for nm in names:
-            if nm.startswith("obj"):
+            if nm.startswith("obj") or nm.startswith("goal_obj"):
                 continue
             if nm == self.table_frame_name:
-                continue
-            if nm == "targetSurface" or nm.startswith("targetSurface_"):
                 continue
 
             fr = C.getFrame(nm)
@@ -605,170 +327,103 @@ class PandaTableVoxelClutterGenerator:
                 rxmax <= xmin or rxmin >= xmax or
                 rymax <= ymin or rymin >= ymax
             )
-
             if overlaps_table_xy:
                 rects.append(rect)
 
-        rects.extend(self.static_rects)
+        return rects
+
+    def _current_alive_object_rects(self, C: ry.Config, include_target=False):
+        rects = []
+
+        for obj in self.spawned_objects:
+            if not obj["alive"]:
+                continue
+            if obj.get("is_target", False) and not include_target:
+                continue
+
+            base_name = f"{obj['prefix']}base"
+            if base_name not in C.getFrameNames():
+                continue
+
+            size_xy = obj.get("footprint_size_xy", None)
+            if size_xy is None:
+                continue
+
+            base = C.getFrame(base_name)
+            pos = np.array(base.getPosition(), dtype=float)
+            x = float(pos[0])
+            y = float(pos[1])
+
+            half_x = 0.5 * float(size_xy[0])
+            half_y = 0.5 * float(size_xy[1])
+
+            rect = (x - half_x, x + half_x, y - half_y, y + half_y)
+            rects.append(rect)
+
         return rects
 
     # =========================================================
-    # Tracking reset
+    # Tracking
     # =========================================================
     def _reset_tracking(self):
-        """Reset per-environment state."""
         self.spawned_objects = []
         self.used_files = set()
         self.reserved_files = set()
         self.object_counter = 0
-        self.static_rects = []
-        self.target_surface_info = None
         self.target_voxel_file = None
-        self.target_surface_choice = None
+        self.target_quarter_mode = None
+        self.target_object_prefix = None
 
     # =========================================================
-    # Target voxel selection
+    # Target selection
     # =========================================================
-    def _choose_target_voxel_and_side(self):
-        """
-        Choose:
-        1. one voxel uniformly among eligible voxel files,
-        2. one stable side uniformly from that voxel.
-        """
+    def _choose_target_voxel(self):
         voxel_files = self._load_voxel_files()
-        eligible = []
-
-        for vf in voxel_files:
-            cubes = self._voxel_cube_geometry(str(vf))
-            stable_surfaces = self._stable_resting_surfaces(cubes)
-            if len(stable_surfaces) > 0:
-                eligible.append((str(vf), cubes, stable_surfaces))
-
-        if len(eligible) == 0:
-            raise RuntimeError("Could not find any voxel with at least one stable resting side.")
-
-        chosen_idx = int(self.rng.integers(len(eligible)))
-        voxel_file, cubes, stable_surfaces = eligible[chosen_idx]
-
-        side_idx = int(self.rng.integers(len(stable_surfaces)))
-        surface = stable_surfaces[side_idx]
-
+        chosen_idx = int(self.rng.integers(len(voxel_files)))
+        voxel_file = str(voxel_files[chosen_idx])
         self.target_voxel_file = voxel_file
-        self.target_surface_choice = surface
+        return voxel_file
 
-        return voxel_file, cubes, surface
+    def _choose_target_quarter(self):
+        quarter = self._quarter_modes()[int(self.rng.integers(4))]
+        self.target_quarter_mode = quarter
+        return quarter
 
-    def _place_target_surface_marker(self, C: ry.Config):
-        """
-        Place a 2D colored marker for the chosen target face.
+    def _set_target_alpha(self, C: ry.Config, prefix: str, alpha: float):
+        cube_names = self._cube_frames(C, prefix)
 
-        Implementation detail:
-        - A single parent frame 'targetSurface' is created.
-        - Each colored tile becomes a child frame under it.
-        - This gives one marker parent frame name that can be returned.
-        """
-        if self.target_voxel_file is None or self.target_surface_choice is None:
-            raise RuntimeError("Target voxel/side has not been chosen yet.")
+        for nm in cube_names:
+            fr = C.getFrame(nm)
 
-        voxel_file = self.target_voxel_file
-        surface = self.target_surface_choice
+            rgb = [0.8, 0.8, 0.8]
+            try:
+                attrs = fr.getAttributes()
+                if "color" in attrs:
+                    raw_color = list(attrs["color"])
+                    if len(raw_color) >= 3:
+                        rgb = [
+                            float(raw_color[0]),
+                            float(raw_color[1]),
+                            float(raw_color[2]),
+                        ]
+            except Exception:
+                pass
 
-        size_xy = surface["bbox_size_2d"]
-        marker_half_mode = self._opposite_half_mode(self.spawn_half_mode)
-
-        placed_rects = self._scene_occupied_rects(C)
-        cx, cy, rect = self._sample_noncolliding_xy(
-            C,
-            size_xy,
-            placed_rects,
-            half_mode=marker_half_mode,
-        )
-
-        table_info = self._get_table_info(C)
-        z_marker = table_info["top_z"] + self.marker_thickness / 2.0
-
-        local_center_2d = 0.5 * (surface["bbox_min_2d"] + surface["bbox_max_2d"])
-
-        marker_parent_name = "targetSurface"
-        tile_names = []
-
-        # Remove stale targetSurface if somehow present
-        if marker_parent_name in C.getFrameNames():
-            C.delFrame(marker_parent_name)
-
-        C.addFrame(marker_parent_name).setPosition([cx, cy, z_marker])
-
-        for i, r in enumerate(surface["support_rects"]):
-            tile_center_local = r["center_2d"] - local_center_2d
-
-            sx = float(r["size_2d"][0])
-            sy = float(r["size_2d"][1])
-            tile_color = [float(c) for c in r["color"][:3]]
-
-            nm = f"{marker_parent_name}_tile_{i}"
-            C.addFrame(nm, marker_parent_name) \
-                .setShape(ry.ST.ssBox, size=[sx, sy, self.marker_thickness, 0.001]) \
-                .setColor(tile_color) \
-                .setRelativePosition([
-                    float(tile_center_local[0]),
-                    float(tile_center_local[1]),
-                    0.0,
-                ])
-
-            tile_names.append(nm)
-
-        self.static_rects.append(rect)
-
-        self.target_surface_info = {
-            "voxel_file": voxel_file,
-            "voxel_basename": os.path.basename(voxel_file),
-            "side_name": surface["side_name"],
-            "axis": surface["axis"],
-            "use_max_side": surface["use_max_side"],
-            "stable": surface["stable"],
-            "support_cube_count": len(surface["touching_cubes"]),
-            "marker_center_xy": (cx, cy),
-            "marker_rect": rect,
-            "marker_frame_name": marker_parent_name,
-            "marker_tile_names": tile_names,
-            "support_bbox_size_2d": surface["bbox_size_2d"].tolist(),
-            "com_local": surface["com"].tolist(),
-            "com_proj_local": surface["com_proj"].tolist(),
-            "spawn_half_mode": self.spawn_half_mode,
-            "marker_half_mode": marker_half_mode,
-        }
-
-        return self.target_surface_info
-
-    def spawn_target_voxel(self, C: ry.Config):
-        """Spawn the chosen target voxel into the scene."""
-        if self.target_voxel_file is None:
-            raise RuntimeError("Target voxel file has not been selected yet.")
-
-        placed_rects = self._scene_occupied_rects(C)
-        obj = self._spawn_one_voxel(C, self.target_voxel_file, placed_rects)
-        return obj
+            fr.setAttributes({"color": [rgb[0], rgb[1], rgb[2], float(alpha)]})
 
     # =========================================================
-    # Placement / spawning
+    # Placement helpers
     # =========================================================
-    def _sample_noncolliding_xy(
+    def _sample_xy_in_region_bounds(
         self,
         C: ry.Config,
         size_xy,
-        placed_rects,
-        max_tries=3000,
-        half_mode=None,
+        region_mode,
     ):
-        """
-        Sample a random XY position for a rectangle of size size_xy such that:
-        - it lies inside the allowed region,
-        - it does not overlap already occupied rectangles.
-        """
-        xmin, xmax, ymin, ymax = self._spawn_region_bounds_xy(
+        xmin, xmax, ymin, ymax = self._quarter_bounds_xy(
             C,
             margin=0.0,
-            half_mode=half_mode,
+            quarter_mode=region_mode,
         )
 
         half_x = size_xy[0] / 2.0
@@ -779,40 +434,261 @@ class PandaTableVoxelClutterGenerator:
         y_min = ymin + half_y + self.gap
         y_max = ymax - half_y - self.gap
 
-        resolved_half_mode = half_mode if half_mode is not None else self.spawn_half_mode
-
         if x_min > x_max or y_min > y_max:
-            raise ValueError(
-                f"Allowed region too small for an object of size {size_xy} "
-                f"under mode '{resolved_half_mode}'."
-            )
+            return None
+
+        x = float(self.rng.uniform(x_min, x_max))
+        y = float(self.rng.uniform(y_min, y_max))
+        rect = (x - half_x, x + half_x, y - half_y, y + half_y)
+        return x, y, rect, region_mode
+
+    def _sample_xy_in_regions_bounds(
+        self,
+        C: ry.Config,
+        size_xy,
+        region_modes,
+        max_tries=256,
+    ):
+        region_modes = list(region_modes)
+        if len(region_modes) == 0:
+            raise RuntimeError("No region modes provided for placement.")
 
         for _ in range(max_tries):
-            x = float(self.rng.uniform(x_min, x_max))
-            y = float(self.rng.uniform(y_min, y_max))
-            rect = (x - half_x, x + half_x, y - half_y, y + half_y)
-
-            collides = any(
-                self._rectangles_overlap(rect, other, extra_gap=self.gap)
-                for other in placed_rects
+            mode = region_modes[int(self.rng.integers(len(region_modes)))]
+            out = self._sample_xy_in_region_bounds(
+                C,
+                size_xy,
+                region_mode=mode,
             )
-            if not collides:
-                return x, y, rect
+            if out is not None:
+                return out
 
-        raise RuntimeError(
-            "Could not find non-colliding position "
-            f"in half_mode={resolved_half_mode}."
+        for mode in region_modes:
+            out = self._sample_xy_in_region_bounds(
+                C,
+                size_xy,
+                region_mode=mode,
+            )
+            if out is not None:
+                return out
+
+        return None
+
+    def _choose_random_clutter_xy(
+        self,
+        C: ry.Config,
+        size_xy,
+        region_modes,
+    ):
+        out = self._sample_xy_in_regions_bounds(
+            C,
+            size_xy,
+            region_modes=region_modes,
+            max_tries=256,
+        )
+        if out is None:
+            raise RuntimeError("Could not find in-bounds position in any allowed region.")
+
+        x, y, rect, _ = out
+        return x, y, rect
+
+    def _choose_low_clutter_xy(
+        self,
+        C: ry.Config,
+        size_xy,
+        occupied_rects,
+        region_modes,
+    ):
+        candidate_count = max(32, self.placement_candidate_count)
+        reference_rects = list(occupied_rects)
+
+        best = None
+        best_key = None
+
+        for _ in range(candidate_count):
+            out = self._sample_xy_in_regions_bounds(
+                C,
+                size_xy,
+                region_modes=region_modes,
+                max_tries=16,
+            )
+            if out is None:
+                continue
+
+            x, y, rect, _ = out
+
+            overlap_count = self._count_overlaps(
+                rect,
+                occupied_rects,
+                extra_gap=self.gap,
+            )
+
+            if len(reference_rects) > 0:
+                min_clearance = min(
+                    self._rect_clearance(rect, other) for other in reference_rects
+                )
+            else:
+                min_clearance = float("inf")
+
+            random_tiebreak = float(self.rng.random())
+
+            # Primary goal: minimize overlap count (with gap).
+            # Secondary goal: maximize nearest clearance.
+            key = (overlap_count, -min_clearance, random_tiebreak)
+
+            if best is None or key < best_key:
+                best = (x, y, rect)
+                best_key = key
+
+        if best is None:
+            raise RuntimeError("Could not find any in-bounds low-clutter candidate.")
+
+        return best
+
+    def _choose_high_clutter_xy(
+        self,
+        C: ry.Config,
+        size_xy,
+        clutter_rects,
+        region_modes,
+    ):
+        candidate_count = max(32, self.placement_candidate_count)
+
+        if len(clutter_rects) == 0:
+            return self._choose_random_clutter_xy(
+                C,
+                size_xy,
+                region_modes=region_modes,
+            )
+
+        best = None
+        best_key = None
+
+        for _ in range(candidate_count):
+            out = self._sample_xy_in_regions_bounds(
+                C,
+                size_xy,
+                region_modes=region_modes,
+                max_tries=16,
+            )
+            if out is None:
+                continue
+
+            x, y, rect, _ = out
+            rect_center = self._rect_center(rect)
+
+            min_clearance = min(
+                self._rect_clearance(rect, other) for other in clutter_rects
+            )
+            min_center_dist = min(
+                float(np.linalg.norm(rect_center - self._rect_center(other)))
+                for other in clutter_rects
+            )
+
+            random_tiebreak = float(self.rng.random())
+
+            # Prefer candidates close to existing clutter.
+            key = (min_clearance, min_center_dist, random_tiebreak)
+
+            if best is None or key < best_key:
+                best = (x, y, rect)
+                best_key = key
+
+        if best is None:
+            raise RuntimeError("Could not find any in-bounds high-clutter candidate.")
+
+        return best
+
+    def _choose_clutter_xy(
+        self,
+        C: ry.Config,
+        size_xy,
+        occupied_rects,
+        clutter_rects,
+        region_modes,
+    ):
+        if self.clutter_mode == "random":
+            return self._choose_random_clutter_xy(
+                C,
+                size_xy,
+                region_modes=region_modes,
+            )
+
+        if self.clutter_mode == "low_clutter":
+            return self._choose_low_clutter_xy(
+                C,
+                size_xy,
+                occupied_rects=occupied_rects,
+                region_modes=region_modes,
+            )
+
+        if self.clutter_mode == "high_clutter":
+            return self._choose_high_clutter_xy(
+                C,
+                size_xy,
+                clutter_rects=clutter_rects,
+                region_modes=region_modes,
+            )
+
+        raise ValueError(f"Unsupported clutter_mode: {self.clutter_mode}")
+
+    def _sample_target_xy_near_quarter_center_no_occupancy_check(
+        self,
+        C: ry.Config,
+        size_xy,
+        quarter_mode,
+        max_tries=200,
+    ):
+        xmin, xmax, ymin, ymax = self._quarter_bounds_xy(
+            C,
+            margin=0.0,
+            quarter_mode=quarter_mode,
         )
 
-    def _spawn_one_voxel(self, C: ry.Config, gfile: str, placed_rects):
-        """
-        Spawn one voxel object:
-        - compute random rotation
-        - estimate rotated footprint
-        - sample collision-free XY
-        - place above table
-        - enable contact and mass
-        """
+        half_x = size_xy[0] / 2.0
+        half_y = size_xy[1] / 2.0
+
+        x_min = xmin + half_x + self.gap
+        x_max = xmax - half_x - self.gap
+        y_min = ymin + half_y + self.gap
+        y_max = ymax - half_y - self.gap
+
+        if x_min > x_max or y_min > y_max:
+            raise RuntimeError(f"Quarter '{quarter_mode}' is too small for target object.")
+
+        center = self._quarter_center_xy(C, quarter_mode)
+        usable_width = x_max - x_min
+        usable_height = y_max - y_min
+
+        jitter_x = 0.5 * usable_width * self.target_center_jitter_ratio
+        jitter_y = 0.5 * usable_height * self.target_center_jitter_ratio
+
+        for _ in range(max_tries):
+            x = float(center[0] + self.rng.uniform(-jitter_x, jitter_x))
+            y = float(center[1] + self.rng.uniform(-jitter_y, jitter_y))
+
+            x = min(max(x, x_min), x_max)
+            y = min(max(y, y_min), y_max)
+
+            rect = (x - half_x, x + half_x, y - half_y, y + half_y)
+            return x, y, rect
+
+        raise RuntimeError("Could not sample target XY near quarter center.")
+
+    # =========================================================
+    # Spawning
+    # =========================================================
+    def _spawn_one_voxel(
+        self,
+        C: ry.Config,
+        gfile: str,
+        occupied_rects,
+        region_modes,
+        clutter_rects=None,
+        is_target=False,
+        force_quarter_center=False,
+        ignore_occupancy_for_target=False,
+    ):
         cubes = self._voxel_cube_geometry(gfile)
         local_min, _ = self._local_aabb(cubes)
 
@@ -820,19 +696,34 @@ class PandaTableVoxelClutterGenerator:
         _, _, rot_size_xy = self._rotated_xy_aabb_size(cubes, theta)
 
         try:
-            x, y, rect = self._sample_noncolliding_xy(
-                C,
-                rot_size_xy,
-                placed_rects,
-                half_mode=self.spawn_half_mode,
-            )
+            if is_target and force_quarter_center:
+                if len(region_modes) != 1:
+                    raise ValueError("Target center placement expects exactly one quarter.")
+
+                if ignore_occupancy_for_target:
+                    x, y, rect = self._sample_target_xy_near_quarter_center_no_occupancy_check(
+                        C,
+                        rot_size_xy,
+                        quarter_mode=region_modes[0],
+                    )
+                else:
+                    raise ValueError("This configuration is not used in current logic.")
+            else:
+                x, y, rect = self._choose_clutter_xy(
+                    C,
+                    rot_size_xy,
+                    occupied_rects=occupied_rects,
+                    clutter_rects=(clutter_rects if clutter_rects is not None else []),
+                    region_modes=region_modes,
+                )
         except RuntimeError:
             return None
 
         table_info = self._get_table_info(C)
         z = float(table_info["top_z"] - local_min[2] + self.spawn_height)
 
-        prefix = f"obj{self.object_counter}_"
+        prefix_core = f"{self.object_counter}_"
+        prefix = f"goal_obj{prefix_core}" if is_target else f"obj{prefix_core}"
         self.object_counter += 1
 
         C.addFile(gfile, namePrefix=prefix)
@@ -847,36 +738,187 @@ class PandaTableVoxelClutterGenerator:
         base.setQuaternion(self._quat_from_z_rotation(theta))
 
         voxel_names = self._cube_frames(C, prefix)
+
         for nm in voxel_names:
-            C.getFrame(nm).setContact(True)
-            C.getFrame(nm).setMass(self.per_cube_mass)
+            fr = C.getFrame(nm)
+            fr.setContact(True)
+            fr.setMass(self.per_cube_mass)
+
+        if is_target:
+            self._set_target_alpha(C, prefix, self.target_alpha)
+
+            voxel_names = self._cube_frames(C, prefix)
+            for nm in voxel_names:
+                fr = C.getFrame(nm)
+                fr.setContact(True)
+                fr.setMass(self.per_cube_mass)
+
+            self.target_object_prefix = prefix
+
+        basename = os.path.basename(gfile)
+        reported_basename = f"goal_{basename}" if is_target else basename
 
         obj_info = {
             "prefix": prefix,
             "file": str(gfile),
-            "basename": os.path.basename(gfile),
+            "basename": reported_basename,
+            "original_basename": basename,
             "spawn_xy": (x, y),
             "spawn_z": z,
             "theta_rad": theta,
             "theta_deg": float(np.degrees(theta)),
             "spawn_rect": rect,
+            "footprint_size_xy": [float(rot_size_xy[0]), float(rot_size_xy[1])],
             "alive": True,
-            "spawn_half_mode": self.spawn_half_mode,
+            "is_target": bool(is_target),
+            "target_alpha": self.target_alpha if is_target else None,
+            "region_modes": list(region_modes),
+            "clutter_mode": None if is_target else self.clutter_mode,
         }
 
         self.spawned_objects.append(obj_info)
         self.used_files.add(str(gfile))
-        placed_rects.append(rect)
+
+        occupied_rects.append(rect)
+        if (clutter_rects is not None) and (not is_target):
+            clutter_rects.append(rect)
 
         return obj_info
 
+    def _spawn_target_voxel_surviving(
+        self,
+        C: ry.Config,
+        sim_seconds,
+        sim_dt,
+        xy_margin,
+        z_tolerance,
+        max_spawn_attempts=40,
+        verbose=True,
+    ):
+        if self.target_voxel_file is None:
+            raise RuntimeError("Target voxel file has not been selected yet.")
+        if self.target_quarter_mode is None:
+            raise RuntimeError("Target quarter has not been selected yet.")
+
+        xmin, xmax, ymin, ymax = self._table_bounds_xy(C, margin=xy_margin)
+        table_top = self._get_table_info(C)["top_z"]
+
+        qxmin, qxmax, qymin, qymax = self._quarter_bounds_xy(
+            C,
+            margin=0.0,
+            quarter_mode=self.target_quarter_mode,
+        )
+
+        if verbose:
+            print("\n=== Target spawn diagnostics ===")
+            print(f"Target voxel file         : {self.target_voxel_file}")
+            print(f"Target quarter            : {self.target_quarter_mode}")
+            print(f"Target quarter bounds     : x[{qxmin:.4f}, {qxmax:.4f}] y[{qymin:.4f}, {qymax:.4f}]")
+            print(f"On-table bounds (margin)  : x[{xmin:.4f}, {xmax:.4f}] y[{ymin:.4f}, {ymax:.4f}]")
+            print(f"Table top z               : {table_top:.4f}")
+            print(f"z_tolerance               : {z_tolerance:.4f}")
+            print(f"Survival threshold z      : {table_top - z_tolerance:.4f}")
+            print(f"sim_seconds               : {sim_seconds}")
+            print(f"sim_dt                    : {sim_dt}")
+            print(f"max_spawn_attempts        : {max_spawn_attempts}")
+
+        for attempt_idx in range(1, max_spawn_attempts + 1):
+            if verbose:
+                print(f"\n--- Target attempt {attempt_idx}/{max_spawn_attempts} ---")
+
+            target_obj = self._spawn_one_voxel(
+                C,
+                self.target_voxel_file,
+                occupied_rects=[],
+                clutter_rects=None,
+                region_modes=[self.target_quarter_mode],
+                is_target=True,
+                force_quarter_center=True,
+                ignore_occupancy_for_target=True,
+            )
+
+            if target_obj is None:
+                if verbose:
+                    print("Spawn failed immediately: _spawn_one_voxel returned None.")
+                continue
+
+            base_name = f"{target_obj['prefix']}base"
+
+            if base_name not in C.getFrameNames():
+                if verbose:
+                    print(f"Spawned target base frame missing right after spawn: {base_name}")
+                self.remove_objects(C, [target_obj])
+                continue
+
+            base_before = C.getFrame(base_name)
+            pos_before = np.array(base_before.getPosition(), dtype=float)
+            x0, y0, z0 = float(pos_before[0]), float(pos_before[1]), float(pos_before[2])
+
+            if verbose:
+                print(f"Spawn prefix              : {target_obj['prefix']}")
+                print(f"Spawn basename            : {target_obj['basename']}")
+                print(f"Recorded spawn_xy         : {target_obj['spawn_xy']}")
+                print(f"Recorded spawn_z          : {target_obj['spawn_z']:.4f}")
+                print(f"Recorded theta_deg        : {target_obj['theta_deg']:.2f}")
+                print(f"Base pos before sim       : ({x0:.4f}, {y0:.4f}, {z0:.4f})")
+
+            self.run_physx(C, sim_seconds=sim_seconds, sim_dt=sim_dt)
+
+            if base_name not in C.getFrameNames():
+                if verbose:
+                    print("Target disappeared from config after simulation.")
+                self.remove_objects(C, [target_obj])
+                continue
+
+            base_after = C.getFrame(base_name)
+            pos_after = np.array(base_after.getPosition(), dtype=float)
+            x1, y1, z1 = float(pos_after[0]), float(pos_after[1]), float(pos_after[2])
+
+            dx = x1 - x0
+            dy = y1 - y0
+            dz = z1 - z0
+            dxy = float(np.sqrt(dx * dx + dy * dy))
+            dxyz = float(np.sqrt(dx * dx + dy * dy + dz * dz))
+
+            inside_xy = (xmin <= x1 <= xmax) and (ymin <= y1 <= ymax)
+            not_too_low = z1 >= (table_top - z_tolerance)
+            survived = inside_xy and not_too_low
+
+            if verbose:
+                print(f"Base pos after sim        : ({x1:.4f}, {y1:.4f}, {z1:.4f})")
+                print(f"Motion during sim         : dx={dx:.4f}, dy={dy:.4f}, dz={dz:.4f}, dxy={dxy:.4f}, dxyz={dxyz:.4f}")
+                print(f"Inside XY bounds?         : {inside_xy}")
+                print(f"Above z threshold?        : {not_too_low}")
+
+                if not inside_xy:
+                    x_status = xmin <= x1 <= xmax
+                    y_status = ymin <= y1 <= ymax
+                    print(f"  X valid?                : {x_status}  (allowed [{xmin:.4f}, {xmax:.4f}], got {x1:.4f})")
+                    print(f"  Y valid?                : {y_status}  (allowed [{ymin:.4f}, {ymax:.4f}], got {y1:.4f})")
+
+                if not not_too_low:
+                    print(f"  Z too low               : threshold {table_top - z_tolerance:.4f}, got {z1:.4f}")
+
+            if survived:
+                if verbose:
+                    print("Result                    : SUCCESS (target survived on table)")
+                return target_obj
+
+            if verbose:
+                print("Result                    : FAILED -> removing target and retrying")
+
+            self.remove_objects(C, [target_obj])
+
+        raise RuntimeError(
+            "Failed to spawn a target object that survives on the table."
+        )
+
     def spawn_voxels_best_effort(self, C: ry.Config, target_count):
-        """
-        Try to spawn up to target_count voxel objects.
-        Prefer unused voxel files first for variety.
-        """
-        scene_rects = self._scene_occupied_rects(C)
-        placed_rects = list(scene_rects)
+        static_rects = list(self._scene_occupied_rects(C))
+        alive_clutter_rects = self._current_alive_object_rects(C, include_target=False)
+
+        occupied_rects = static_rects + alive_clutter_rects
+        clutter_rects = list(alive_clutter_rects)
 
         all_files = self._load_voxel_files()
         usable_files = [f for f in all_files if str(f) not in self.reserved_files]
@@ -891,6 +933,12 @@ class PandaTableVoxelClutterGenerator:
         spawned = []
         attempted = set()
 
+        clutter_regions = (
+            self._complement_quarters(self.target_quarter_mode)
+            if self.target_quarter_mode is not None
+            else self._quarter_modes()
+        )
+
         while len(spawned) < target_count:
             found_one = False
 
@@ -899,7 +947,16 @@ class PandaTableVoxelClutterGenerator:
                 if gfile_str in attempted:
                     continue
 
-                obj = self._spawn_one_voxel(C, gfile_str, placed_rects)
+                obj = self._spawn_one_voxel(
+                    C,
+                    gfile_str,
+                    occupied_rects=occupied_rects,
+                    clutter_rects=clutter_rects,
+                    region_modes=clutter_regions,
+                    is_target=False,
+                    force_quarter_center=False,
+                    ignore_occupancy_for_target=False,
+                )
                 attempted.add(gfile_str)
 
                 if obj is not None:
@@ -913,10 +970,9 @@ class PandaTableVoxelClutterGenerator:
         return spawned
 
     # =========================================================
-    # Physics simulation
+    # Simulation
     # =========================================================
     def run_physx(self, C: ry.Config, sim_seconds=7.0, sim_dt=0.01):
-        """Run PhysX simulation for the current config."""
         S = ry.Simulation(C, ry.SimulationEngine.physx, verbose=0)
         S.pushConfigToSim()
 
@@ -927,16 +983,9 @@ class PandaTableVoxelClutterGenerator:
         del S
 
     # =========================================================
-    # On-table checking / removal
+    # Object validity
     # =========================================================
     def _is_object_on_table(self, C: ry.Config, obj, xy_margin=0.01, z_tolerance=0.15):
-        """
-        Check whether an object's base frame is still considered on the table.
-
-        Note:
-        This checks against the full table, not only the chosen spawn half.
-        So the half restriction is only for spawning, not for final validity.
-        """
         prefix = obj["prefix"]
         base_name = f"{prefix}base"
 
@@ -956,10 +1005,6 @@ class PandaTableVoxelClutterGenerator:
         return inside_xy and not_too_low
 
     def find_objects_off_table(self, C: ry.Config, xy_margin=0.01, z_tolerance=0.15):
-        """
-        Split alive objects into on_table and off_table.
-        Returns (on_table, off_table).
-        """
         off_table = []
         on_table = []
 
@@ -967,7 +1012,12 @@ class PandaTableVoxelClutterGenerator:
             if not obj["alive"]:
                 continue
 
-            if self._is_object_on_table(C, obj, xy_margin=xy_margin, z_tolerance=z_tolerance):
+            if self._is_object_on_table(
+                C,
+                obj,
+                xy_margin=xy_margin,
+                z_tolerance=z_tolerance,
+            ):
                 on_table.append(obj)
             else:
                 off_table.append(obj)
@@ -975,7 +1025,6 @@ class PandaTableVoxelClutterGenerator:
         return on_table, off_table
 
     def remove_objects(self, C: ry.Config, objects_to_remove):
-        """Delete all frames belonging to the given objects."""
         frame_names = set(C.getFrameNames())
 
         for obj in objects_to_remove:
@@ -989,7 +1038,7 @@ class PandaTableVoxelClutterGenerator:
             obj["alive"] = False
 
     # =========================================================
-    # Full generation
+    # Main generation
     # =========================================================
     def create_environment_with_refill(
         self,
@@ -1000,109 +1049,129 @@ class PandaTableVoxelClutterGenerator:
         xy_margin=0.02,
         z_tolerance=0.15,
         batch_spawn_count=5,
-        add_target_surface=True,
+        max_target_spawn_attempts=40,
     ):
-        """
-        Main generation function.
-
-        Returns
-        -------
-        (C, summary)
-            C : ry.Config
-                Final cleaned scene.
-
-            summary : dict
-                Metadata, including:
-                - target_voxel_file
-                - target_voxel_basename
-                - target_surface_frame_name
-                - target_surface_frame_names
-        """
         C = self._load_base_scene()
         self._reset_tracking()
 
-        target_spawned = 0
+        if num_voxels <= 0:
+            summary = {
+                "target": num_voxels,
+                "final_on_table": 0,
+                "final_off_table": 0,
+                "rounds": 0,
+                "batch_spawn_count": batch_spawn_count,
+                "clutter_mode": self.clutter_mode,
+                "objects": self.spawned_objects,
+                "target_voxel_file": None,
+                "target_voxel_basename": None,
+                "target_original_voxel_basename": None,
+                "target_quarter_mode": None,
+                "target_object_prefix": None,
+                "target_alpha": self.target_alpha,
+            }
+            return C, summary
 
-        # -----------------------------------------------------
-        # Target-marker pipeline
-        # -----------------------------------------------------
-        if add_target_surface:
-            voxel_file, cubes, surface = self._choose_target_voxel_and_side()
+        voxel_file = self._choose_target_voxel()
+        target_quarter = self._choose_target_quarter()
+        self.reserved_files.add(self.target_voxel_file)
 
-            print("Chosen target voxel:", os.path.basename(voxel_file))
-            print("Chosen target side:", surface["side_name"])
-            print("Voxel spawn half mode:", self.spawn_half_mode)
-            print("Marker half mode:", self._opposite_half_mode(self.spawn_half_mode))
+        print("Chosen target voxel:", os.path.basename(voxel_file))
+        print("Chosen target quarter:", target_quarter)
+        print("Clutter mode:", self.clutter_mode)
 
-            surface_info = self._place_target_surface_marker(C)
-            print("Placed target surface:")
-            print(surface_info)
-
-            target_obj = self.spawn_target_voxel(C)
-            if target_obj is not None:
-                target_spawned = 1
-
-                # Reserve target file so clutter spawning does not reuse it
-                self.reserved_files.add(self.target_voxel_file)
-
-                print(f"Spawned target voxel: {target_obj['basename']}")
-            else:
-                print("Warning: Could not spawn target voxel.")
-
-        # -----------------------------------------------------
-        # Initial clutter spawn
-        # -----------------------------------------------------
-        remaining_to_spawn = max(0, num_voxels - target_spawned)
-        initial_spawn_count = min(batch_spawn_count, remaining_to_spawn)
+        clutter_target_count = max(0, num_voxels - 1)
+        initial_spawn_count = min(batch_spawn_count, clutter_target_count)
 
         initially_spawned = self.spawn_voxels_best_effort(C, initial_spawn_count)
         print(f"Initially spawned extra voxels: {len(initially_spawned)} / {initial_spawn_count}")
 
-        # -----------------------------------------------------
-        # Refill loop
-        # -----------------------------------------------------
         round_idx = 0
         while True:
             round_idx += 1
-            print(f"\n=== Simulation round {round_idx} ===")
+            print(f"\n=== Clutter simulation round {round_idx} ===")
 
             self.run_physx(C, sim_seconds=sim_seconds, sim_dt=sim_dt)
 
-            on_table, off_table = self.find_objects_off_table(
-                C,
-                xy_margin=xy_margin,
-                z_tolerance=z_tolerance,
+            alive_clutter = [
+                obj for obj in self.spawned_objects
+                if obj["alive"] and not obj.get("is_target", False)
+            ]
+            off_clutter = [
+                obj for obj in alive_clutter
+                if not self._is_object_on_table(
+                    C,
+                    obj,
+                    xy_margin=xy_margin,
+                    z_tolerance=z_tolerance,
+                )
+            ]
+            on_clutter = [
+                obj for obj in alive_clutter
+                if self._is_object_on_table(
+                    C,
+                    obj,
+                    xy_margin=xy_margin,
+                    z_tolerance=z_tolerance,
+                )
+            ]
+
+            print(
+                f"Clutter on table: {len(on_clutter)} | "
+                f"Off table: {len(off_clutter)} | "
+                f"Clutter target: {clutter_target_count}"
             )
 
-            print(f"On table: {len(on_table)} | Off table: {len(off_table)} | Target: {num_voxels}")
-
-            if len(on_table) >= num_voxels:
-                print("Desired number of voxels is on the table.")
+            if len(on_clutter) >= clutter_target_count:
+                print("Desired number of clutter voxels is on the table.")
                 break
 
             if round_idx >= max_refill_rounds:
-                print("Reached max refill rounds.")
+                print("Reached max refill rounds for clutter.")
                 break
 
-            if off_table:
-                self.remove_objects(C, off_table)
+            if off_clutter:
+                self.remove_objects(C, off_clutter)
 
-            missing = num_voxels - len(on_table)
+            missing = clutter_target_count - len(on_clutter)
             to_spawn_now = min(batch_spawn_count, missing)
 
-            print(f"Trying to respawn up to {to_spawn_now} voxel(s)...")
+            print(f"Trying to respawn up to {to_spawn_now} clutter voxel(s)...")
             spawned_now = self.spawn_voxels_best_effort(C, to_spawn_now)
-            print(f"Respawned {len(spawned_now)} voxel(s).")
+            print(f"Respawned {len(spawned_now)} clutter voxel(s).")
 
             if len(spawned_now) == 0:
-                print("Could not spawn any new voxel this round. Stopping early.")
+                print("Could not spawn any new clutter voxel this round. Stopping clutter refill.")
                 break
 
-        # -----------------------------------------------------
-        # Final cleanup
-        # -----------------------------------------------------
-        # This is the key fix: even if the loop stops, the last scene may still
-        # contain off-table objects. We remove them before returning.
+        alive_clutter = [
+            obj for obj in self.spawned_objects
+            if obj["alive"] and not obj.get("is_target", False)
+        ]
+        final_off_clutter = [
+            obj for obj in alive_clutter
+            if not self._is_object_on_table(
+                C,
+                obj,
+                xy_margin=xy_margin,
+                z_tolerance=z_tolerance,
+            )
+        ]
+        if final_off_clutter:
+            print(f"Removing {len(final_off_clutter)} final off-table clutter voxel(s).")
+            self.remove_objects(C, final_off_clutter)
+
+        print("\n=== Spawning target last ===")
+        target_obj = self._spawn_target_voxel_surviving(
+            C,
+            sim_seconds=sim_seconds,
+            sim_dt=sim_dt,
+            xy_margin=xy_margin,
+            z_tolerance=z_tolerance,
+            max_spawn_attempts=max_target_spawn_attempts,
+        )
+        print(f"Spawned surviving target voxel: {target_obj['basename']}")
+
         final_on, final_off = self.find_objects_off_table(
             C,
             xy_margin=xy_margin,
@@ -1110,15 +1179,23 @@ class PandaTableVoxelClutterGenerator:
         )
 
         if final_off:
-            print(f"Removing {len(final_off)} final off-table voxel(s) from returned config.")
-            self.remove_objects(C, final_off)
+            non_target_final_off = [
+                obj for obj in final_off
+                if not obj.get("is_target", False)
+            ]
+            if non_target_final_off:
+                print(f"Removing {len(non_target_final_off)} final off-table non-target voxel(s).")
+                self.remove_objects(C, non_target_final_off)
 
-        # Recompute after cleanup so summary matches the actual returned config
         final_on, final_off = self.find_objects_off_table(
             C,
             xy_margin=xy_margin,
             z_tolerance=z_tolerance,
         )
+
+        alive_target = [obj for obj in final_on if obj.get("is_target", False)]
+        if len(alive_target) != 1:
+            raise RuntimeError("Final scene does not contain exactly one on-table target object.")
 
         summary = {
             "target": num_voxels,
@@ -1126,23 +1203,20 @@ class PandaTableVoxelClutterGenerator:
             "final_off_table": len(final_off),
             "rounds": round_idx,
             "batch_spawn_count": batch_spawn_count,
-            "spawn_half_mode": self.spawn_half_mode,
-            "marker_half_mode": self._opposite_half_mode(self.spawn_half_mode),
+            "clutter_mode": self.clutter_mode,
             "objects": self.spawned_objects,
-            "target_surface": self.target_surface_info,
             "target_voxel_file": self.target_voxel_file,
             "target_voxel_basename": (
+                f"goal_{os.path.basename(self.target_voxel_file)}"
+                if self.target_voxel_file is not None else None
+            ),
+            "target_original_voxel_basename": (
                 os.path.basename(self.target_voxel_file)
                 if self.target_voxel_file is not None else None
             ),
-            "target_surface_frame_name": (
-                self.target_surface_info["marker_frame_name"]
-                if self.target_surface_info is not None else None
-            ),
-            "target_surface_frame_names": (
-                self.target_surface_info["marker_tile_names"]
-                if self.target_surface_info is not None else []
-            ),
+            "target_quarter_mode": self.target_quarter_mode,
+            "target_object_prefix": self.target_object_prefix,
+            "target_alpha": self.target_alpha,
         }
 
         return C, summary
@@ -1151,7 +1225,6 @@ class PandaTableVoxelClutterGenerator:
     # Save
     # =========================================================
     def save_environment(self, C: ry.Config, file_name="generated_panda_table_voxel_clutter.g"):
-        """Save config C to a .g file and return the path."""
         out_file = self.output_dir / file_name
         with open(out_file, "w", encoding="utf-8") as f:
             f.write(C.write())
