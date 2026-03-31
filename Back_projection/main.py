@@ -37,7 +37,9 @@ class Sam3Pipeline:
 
         self._plot_boxes(image_path, kept_boxes)
 
-        return kept_boxes, segment_maps
+        seg_map = self.masks_to_segmentation_map(segment_maps)  # <-- new
+
+        return kept_boxes, segment_maps, seg_map
 
     def _nms(self, boxes, scores):
         if not isinstance(boxes, torch.Tensor):
@@ -68,6 +70,16 @@ class Sam3Pipeline:
             order = order[1:][iou <= self.iou_threshold]
 
         return kept
+    
+    def masks_to_segmentation_map(self, segment_maps: list) -> np.ndarray:
+        H, W = segment_maps[0].shape[-2], segment_maps[0].shape[-1]
+        seg_map = np.zeros((H, W), dtype=np.int32)
+
+        for seg_id, mask in enumerate(segment_maps, start=1):
+            mask = np.array(mask).squeeze()
+            seg_map[mask.astype(bool)] = seg_id
+
+        return seg_map
 
     def _plot_boxes(self, image_path: str, boxes):
         image = Image.open(image_path)
