@@ -110,7 +110,8 @@ if __name__ == "__main__":
         iou_threshold=0.5
     )
 
-    kept_boxes, segment_maps = pipeline.run(
+    kept_boxes, segment_maps, segment_ids = pipeline.run(
         image_path="../segmentation/sample_segmentation_img.png",
         prompt="all the objects in different colors"
     )
+    
