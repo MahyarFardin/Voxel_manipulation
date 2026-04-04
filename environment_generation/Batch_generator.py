@@ -36,6 +36,7 @@ def remove_panda(C):
             C.delFrame(frame)
 
 def main(idx):
+
     generator = PandaTableVoxelClutterGenerator(
         base_scene_file=ry.raiPath("../rai-robotModels/scenarios/pandaSingle.g"),  
         voxel_dir="../voxel_generation/data/",                                    
