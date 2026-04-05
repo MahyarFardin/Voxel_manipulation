@@ -10,21 +10,30 @@ class PandaTableVoxelClutterGenerator:
     """
     Generates Panda-table voxel scenes with these rules:
 
-    1. One target voxel is chosen in advance.
+    1. One target voxel file is chosen in advance.
     2. One random table quarter is assigned to that target.
-    3. All non-target voxels are spawned only in the other three quarters.
-    4. Non-target voxels are simulated/refilled first.
-    5. The target is spawned last.
-    6. The target is spawned near the center of its assigned quarter.
-    7. The target quarter is NOT checked for emptiness during target insertion.
-    8. The target must survive simulation and remain on the table.
-    9. The target is loaded with a frame prefix starting with 'goal_'.
-    10. The alpha channel of all target cubes is changed while preserving RGB.
+    3. Normal clutter voxels are spawned according to clutter_mode:
+       - random / low_clutter: in the three non-target quarters
+       - high_clutter: in the quarter opposite the target quarter
+    4. A normal-opacity copy of the target voxel is also spawned into the clutter
+       with the frame prefix 'goal_'.
+    5. A translucent copy of the same target voxel is spawned near the center of
+       the selected quarter with the frame prefix 'goal_pose_'.
+    6. The clutter-side goal_ object has an insertion order controlled by
+       hardnessOfTargetObject:
+          - 0.0 => as late as possible among clutter drops
+          - 1.0 => as early as possible among clutter drops
+    7. The final scene is validated so that both:
+          - one goal_ object survives on the table
+          - one goal_pose_ object survives on the table
+    8. The goal_pose_ object uses reduced alpha while preserving RGB.
+       The goal_ object keeps its original alpha.
 
     Non-target clutter placement modes:
-    - "random": purely random inside the 3 allowed quarters, no clutter overlap check
-    - "low_clutter": best-effort spread-out placement, prefers non-collision and open areas
-    - "high_clutter": prefers placement close to existing clutter, creating dense clusters
+    - "random": purely random inside the 3 non-target quarters, no clutter overlap check
+    - "low_clutter": best-effort spread-out placement in the 3 non-target quarters
+    - "high_clutter": prefers placement close to existing clutter, creating dense clusters,
+      and samples clutter only from the quarter opposite the target quarter
     """
 
     def __init__(
@@ -43,6 +52,7 @@ class PandaTableVoxelClutterGenerator:
         target_center_jitter_ratio=0.10,
         clutter_mode="random",
         placement_candidate_count=96,
+        hardnessOfTargetObject=0.0,
     ):
         self.base_scene_file = Path(base_scene_file)
         self.voxel_dir = Path(voxel_dir)
@@ -59,6 +69,10 @@ class PandaTableVoxelClutterGenerator:
 
         self.clutter_mode = str(clutter_mode)
         self.placement_candidate_count = int(placement_candidate_count)
+
+        self.hardnessOfTargetObject = float(hardnessOfTargetObject)
+        if not (0.0 <= self.hardnessOfTargetObject <= 1.0):
+            raise ValueError("hardnessOfTargetObject must be between 0 and 1.")
 
         allowed_modes = {"random", "low_clutter", "high_clutter"}
         if self.clutter_mode not in allowed_modes:
@@ -80,7 +94,13 @@ class PandaTableVoxelClutterGenerator:
 
         self.target_voxel_file = None
         self.target_quarter_mode = None
-        self.target_object_prefix = None
+
+        self.goal_clutter_object_prefix = None
+        self.goal_pose_object_prefix = None
+
+        self.goal_clutter_insert_index = None
+        self.clutter_spawn_success_count = 0
+        self.goal_clutter_has_spawned_once = False
 
     # =========================================================
     # Basic helpers
@@ -174,6 +194,34 @@ class PandaTableVoxelClutterGenerator:
 
     def _complement_quarters(self, target_quarter):
         return [q for q in self._quarter_modes() if q != target_quarter]
+
+    def _opposite_quarter(self, quarter_mode):
+        mapping = {
+            "front_left": "back_right",
+            "front_right": "back_left",
+            "back_left": "front_right",
+            "back_right": "front_left",
+        }
+        if quarter_mode not in mapping:
+            raise ValueError(f"Unknown quarter_mode: {quarter_mode}")
+        return mapping[quarter_mode]
+
+    def _clutter_region_modes(self):
+        """
+        Returns the quarter(s) used for spawning non-goal_pose clutter.
+
+        Rules:
+        - if no target quarter is known yet, allow all quarters
+        - for random / low_clutter: allow the 3 non-target quarters
+        - for high_clutter: allow only the quarter opposite the target quarter
+        """
+        if self.target_quarter_mode is None:
+            return self._quarter_modes()
+
+        if self.clutter_mode == "high_clutter":
+            return [self._opposite_quarter(self.target_quarter_mode)]
+
+        return self._complement_quarters(self.target_quarter_mode)
 
     # =========================================================
     # Voxel geometry
@@ -312,7 +360,7 @@ class PandaTableVoxelClutterGenerator:
         xmin, xmax, ymin, ymax = self._table_bounds_xy(C, margin=0.0)
 
         for nm in names:
-            if nm.startswith("obj") or nm.startswith("goal_obj"):
+            if nm.startswith("obj") or nm.startswith("goal_") or nm.startswith("goal_pose_"):
                 continue
             if nm == self.table_frame_name:
                 continue
@@ -338,7 +386,8 @@ class PandaTableVoxelClutterGenerator:
         for obj in self.spawned_objects:
             if not obj["alive"]:
                 continue
-            if obj.get("is_target", False) and not include_target:
+
+            if (not include_target) and (not obj.get("counts_as_clutter", False)):
                 continue
 
             base_name = f"{obj['prefix']}base"
@@ -362,6 +411,20 @@ class PandaTableVoxelClutterGenerator:
 
         return rects
 
+    def _alive_on_table_objects(self, C: ry.Config, xy_margin=0.02, z_tolerance=0.15):
+        alive = [obj for obj in self.spawned_objects if obj["alive"]]
+        on_table = [
+            obj for obj in alive
+            if self._is_object_on_table(
+                C,
+                obj,
+                xy_margin=xy_margin,
+                z_tolerance=z_tolerance,
+            )
+        ]
+        off_table = [obj for obj in alive if obj not in on_table]
+        return on_table, off_table
+
     # =========================================================
     # Tracking
     # =========================================================
@@ -370,9 +433,16 @@ class PandaTableVoxelClutterGenerator:
         self.used_files = set()
         self.reserved_files = set()
         self.object_counter = 0
+
         self.target_voxel_file = None
         self.target_quarter_mode = None
-        self.target_object_prefix = None
+
+        self.goal_clutter_object_prefix = None
+        self.goal_pose_object_prefix = None
+
+        self.goal_clutter_insert_index = None
+        self.clutter_spawn_success_count = 0
+        self.goal_clutter_has_spawned_once = False
 
     # =========================================================
     # Target selection
@@ -410,6 +480,69 @@ class PandaTableVoxelClutterGenerator:
                 pass
 
             fr.setAttributes({"color": [rgb[0], rgb[1], rgb[2], float(alpha)]})
+
+
+    def _disable_goal_pose_contact(self, C: ry.Config):
+        """
+        Disables contact for all frames belonging to the surviving goal_pose object.
+        This is intended to be called at the very end, right before saving.
+        """
+        if self.goal_pose_object_prefix is None:
+            return
+
+        prefix = self.goal_pose_object_prefix
+        matching_names = [nm for nm in C.getFrameNames() if nm.startswith(prefix)]
+
+        for nm in matching_names:
+            fr = C.getFrame(nm)
+            if "cube" in nm:
+                if fr is None:
+                    continue
+                try:
+                    fr.setContact(0)
+                except Exception:
+                    pass
+
+    def _compute_goal_clutter_insert_index(self, clutter_total_count: int):
+        """
+        clutter_total_count includes:
+          - normal clutter voxels
+          - exactly one goal_... clutter target voxel
+
+        hardnessOfTargetObject:
+          1.0 -> inserted first among clutter drops
+          0.0 -> inserted last among clutter drops
+        """
+        if clutter_total_count <= 0:
+            return None
+        return int(round((1.0 - self.hardnessOfTargetObject) * (clutter_total_count - 1)))
+
+    def _has_alive_role(self, role: str):
+        return any(
+            obj["alive"] and obj.get("role") == role
+            for obj in self.spawned_objects
+        )
+
+    def _should_spawn_goal_clutter_now(self):
+        """
+        The goal_... clutter object is spawned exactly once as part of clutter creation.
+        Before its first spawn, its position in the drop order is controlled by
+        hardnessOfTargetObject. After it has existed once, if it falls off and needs
+        respawn, it becomes eligible immediately.
+        """
+        if self.target_voxel_file is None:
+            return False
+
+        if self._has_alive_role("goal"):
+            return False
+
+        if self.goal_clutter_has_spawned_once:
+            return True
+
+        if self.goal_clutter_insert_index is None:
+            return False
+
+        return self.clutter_spawn_success_count >= self.goal_clutter_insert_index
 
     # =========================================================
     # Placement helpers
@@ -532,8 +665,6 @@ class PandaTableVoxelClutterGenerator:
 
             random_tiebreak = float(self.rng.random())
 
-            # Primary goal: minimize overlap count (with gap).
-            # Secondary goal: maximize nearest clearance.
             key = (overlap_count, -min_clearance, random_tiebreak)
 
             if best is None or key < best_key:
@@ -587,7 +718,6 @@ class PandaTableVoxelClutterGenerator:
 
             random_tiebreak = float(self.rng.random())
 
-            # Prefer candidates close to existing clutter.
             key = (min_clearance, min_center_dist, random_tiebreak)
 
             if best is None or key < best_key:
@@ -685,7 +815,7 @@ class PandaTableVoxelClutterGenerator:
         occupied_rects,
         region_modes,
         clutter_rects=None,
-        is_target=False,
+        object_role="normal",   # "normal", "goal", "goal_pose"
         force_quarter_center=False,
         ignore_occupancy_for_target=False,
     ):
@@ -696,9 +826,9 @@ class PandaTableVoxelClutterGenerator:
         _, _, rot_size_xy = self._rotated_xy_aabb_size(cubes, theta)
 
         try:
-            if is_target and force_quarter_center:
+            if object_role == "goal_pose" and force_quarter_center:
                 if len(region_modes) != 1:
-                    raise ValueError("Target center placement expects exactly one quarter.")
+                    raise ValueError("goal_pose placement expects exactly one quarter.")
 
                 if ignore_occupancy_for_target:
                     x, y, rect = self._sample_target_xy_near_quarter_center_no_occupancy_check(
@@ -723,7 +853,15 @@ class PandaTableVoxelClutterGenerator:
         z = float(table_info["top_z"] - local_min[2] + self.spawn_height)
 
         prefix_core = f"{self.object_counter}_"
-        prefix = f"goal_obj{prefix_core}" if is_target else f"obj{prefix_core}"
+        if object_role == "normal":
+            prefix = f"obj{prefix_core}"
+        elif object_role == "goal":
+            prefix = f"goal_{prefix_core}"
+        elif object_role == "goal_pose":
+            prefix = f"goal_pose_{prefix_core}"
+        else:
+            raise ValueError(f"Unknown object_role: {object_role}")
+
         self.object_counter += 1
 
         C.addFile(gfile, namePrefix=prefix)
@@ -738,25 +876,23 @@ class PandaTableVoxelClutterGenerator:
         base.setQuaternion(self._quat_from_z_rotation(theta))
 
         voxel_names = self._cube_frames(C, prefix)
-
         for nm in voxel_names:
             fr = C.getFrame(nm)
             fr.setContact(True)
             fr.setMass(self.per_cube_mass)
 
-        if is_target:
+        if object_role == "goal_pose":
             self._set_target_alpha(C, prefix, self.target_alpha)
 
-            voxel_names = self._cube_frames(C, prefix)
-            for nm in voxel_names:
-                fr = C.getFrame(nm)
-                fr.setContact(True)
-                fr.setMass(self.per_cube_mass)
-
-            self.target_object_prefix = prefix
-
         basename = os.path.basename(gfile)
-        reported_basename = f"goal_{basename}" if is_target else basename
+        if object_role == "normal":
+            reported_basename = basename
+        elif object_role == "goal":
+            reported_basename = f"goal_{basename}"
+        else:
+            reported_basename = f"goal_pose_{basename}"
+
+        counts_as_clutter = object_role in {"normal", "goal"}
 
         obj_info = {
             "prefix": prefix,
@@ -770,20 +906,183 @@ class PandaTableVoxelClutterGenerator:
             "spawn_rect": rect,
             "footprint_size_xy": [float(rot_size_xy[0]), float(rot_size_xy[1])],
             "alive": True,
-            "is_target": bool(is_target),
-            "target_alpha": self.target_alpha if is_target else None,
+            "role": object_role,
+            "counts_as_clutter": counts_as_clutter,
+            "is_target_family": object_role in {"goal", "goal_pose"},
+            "target_alpha": self.target_alpha if object_role == "goal_pose" else None,
             "region_modes": list(region_modes),
-            "clutter_mode": None if is_target else self.clutter_mode,
+            "clutter_mode": self.clutter_mode if counts_as_clutter else None,
         }
 
         self.spawned_objects.append(obj_info)
         self.used_files.add(str(gfile))
 
         occupied_rects.append(rect)
-        if (clutter_rects is not None) and (not is_target):
+        if clutter_rects is not None and counts_as_clutter:
             clutter_rects.append(rect)
 
+        if counts_as_clutter:
+            self.clutter_spawn_success_count += 1
+
+        if object_role == "goal":
+            self.goal_clutter_object_prefix = prefix
+            self.goal_clutter_has_spawned_once = True
+        elif object_role == "goal_pose":
+            self.goal_pose_object_prefix = prefix
+
         return obj_info
+
+    def _spawn_goal_clutter_surviving(
+        self,
+        C: ry.Config,
+        sim_seconds,
+        sim_dt,
+        xy_margin,
+        z_tolerance,
+        max_spawn_attempts=40,
+        verbose=True,
+    ):
+        """
+        Ensures there is exactly one surviving on-table goal_... clutter object.
+        If goal_ is missing or fell off, this keeps respawning it in the clutter
+        until one survives.
+        """
+        if self.target_voxel_file is None:
+            raise RuntimeError("Target voxel file has not been selected yet.")
+        if self.target_quarter_mode is None:
+            raise RuntimeError("Target quarter has not been selected yet.")
+
+        clutter_regions = self._clutter_region_modes()
+        xmin, xmax, ymin, ymax = self._table_bounds_xy(C, margin=xy_margin)
+        table_top = self._get_table_info(C)["top_z"]
+
+        if verbose:
+            print("\n=== Final goal_ clutter survival check ===")
+            print(f"Target voxel file         : {self.target_voxel_file}")
+            print(f"Target quarter            : {self.target_quarter_mode}")
+            print(f"Allowed clutter regions   : {clutter_regions}")
+            print(f"On-table bounds (margin)  : x[{xmin:.4f}, {xmax:.4f}] y[{ymin:.4f}, {ymax:.4f}]")
+            print(f"Table top z               : {table_top:.4f}")
+            print(f"z_tolerance               : {z_tolerance:.4f}")
+            print(f"Survival threshold z      : {table_top - z_tolerance:.4f}")
+            print(f"max_spawn_attempts        : {max_spawn_attempts}")
+
+        for attempt_idx in range(1, max_spawn_attempts + 1):
+            if verbose:
+                print(f"\n--- goal_ attempt {attempt_idx}/{max_spawn_attempts} ---")
+
+            alive_goals = [
+                obj for obj in self.spawned_objects
+                if obj["alive"] and obj.get("role") == "goal"
+            ]
+            alive_goal_on_table = [
+                obj for obj in alive_goals
+                if self._is_object_on_table(
+                    C,
+                    obj,
+                    xy_margin=xy_margin,
+                    z_tolerance=z_tolerance,
+                )
+            ]
+
+            if len(alive_goal_on_table) >= 1:
+                keep = alive_goal_on_table[0]
+                extras = [obj for obj in alive_goals if obj is not keep]
+                if extras:
+                    if verbose:
+                        print(f"Multiple alive goal_ objects found; removing extras: {len(extras)}")
+                    self.remove_objects(C, extras)
+                if verbose:
+                    print("A surviving on-table goal_ object already exists.")
+                return keep
+
+            stale_goals = [obj for obj in alive_goals if obj not in alive_goal_on_table]
+            if stale_goals:
+                if verbose:
+                    print(f"Removing stale/off-table goal_ objects: {len(stale_goals)}")
+                self.remove_objects(C, stale_goals)
+
+            static_rects = list(self._scene_occupied_rects(C))
+            alive_clutter_rects = self._current_alive_object_rects(C, include_target=False)
+            occupied_rects = static_rects + alive_clutter_rects
+            clutter_rects = list(alive_clutter_rects)
+
+            goal_obj = self._spawn_one_voxel(
+                C,
+                self.target_voxel_file,
+                occupied_rects=occupied_rects,
+                clutter_rects=clutter_rects,
+                region_modes=clutter_regions,
+                object_role="goal",
+                force_quarter_center=False,
+                ignore_occupancy_for_target=False,
+            )
+
+            if goal_obj is None:
+                if verbose:
+                    print("Spawn failed immediately: _spawn_one_voxel returned None.")
+                continue
+
+            base_name = f"{goal_obj['prefix']}base"
+            if base_name not in C.getFrameNames():
+                if verbose:
+                    print(f"Spawned goal_ base frame missing right after spawn: {base_name}")
+                self.remove_objects(C, [goal_obj])
+                continue
+
+            base_before = C.getFrame(base_name)
+            pos_before = np.array(base_before.getPosition(), dtype=float)
+            x0, y0, z0 = float(pos_before[0]), float(pos_before[1]), float(pos_before[2])
+
+            if verbose:
+                print(f"Spawn prefix              : {goal_obj['prefix']}")
+                print(f"Spawn basename            : {goal_obj['basename']}")
+                print(f"Recorded spawn_xy         : {goal_obj['spawn_xy']}")
+                print(f"Recorded spawn_z          : {goal_obj['spawn_z']:.4f}")
+                print(f"Recorded theta_deg        : {goal_obj['theta_deg']:.2f}")
+                print(f"Base pos before sim       : ({x0:.4f}, {y0:.4f}, {z0:.4f})")
+
+            self.run_physx(C, sim_seconds=sim_seconds, sim_dt=sim_dt)
+
+            if base_name not in C.getFrameNames():
+                if verbose:
+                    print("goal_ disappeared from config after simulation.")
+                self.remove_objects(C, [goal_obj])
+                continue
+
+            base_after = C.getFrame(base_name)
+            pos_after = np.array(base_after.getPosition(), dtype=float)
+            x1, y1, z1 = float(pos_after[0]), float(pos_after[1]), float(pos_after[2])
+
+            dx = x1 - x0
+            dy = y1 - y0
+            dz = z1 - z0
+            dxy = float(np.sqrt(dx * dx + dy * dy))
+            dxyz = float(np.sqrt(dx * dx + dy * dy + dz * dz))
+
+            inside_xy = (xmin <= x1 <= xmax) and (ymin <= y1 <= ymax)
+            not_too_low = z1 >= (table_top - z_tolerance)
+            survived = inside_xy and not_too_low
+
+            if verbose:
+                print(f"Base pos after sim        : ({x1:.4f}, {y1:.4f}, {z1:.4f})")
+                print(f"Motion during sim         : dx={dx:.4f}, dy={dy:.4f}, dz={dz:.4f}, dxy={dxy:.4f}, dxyz={dxyz:.4f}")
+                print(f"Inside XY bounds?         : {inside_xy}")
+                print(f"Above z threshold?        : {not_too_low}")
+
+            if survived:
+                if verbose:
+                    print("Result                    : SUCCESS (goal_ survived on table)")
+                return goal_obj
+
+            if verbose:
+                print("Result                    : FAILED -> removing goal_ and retrying")
+
+            self.remove_objects(C, [goal_obj])
+
+        raise RuntimeError(
+            "Failed to obtain a surviving on-table goal_ clutter object."
+        )
 
     def _spawn_target_voxel_surviving(
         self,
@@ -795,6 +1094,10 @@ class PandaTableVoxelClutterGenerator:
         max_spawn_attempts=40,
         verbose=True,
     ):
+        """
+        Spawns the translucent goal_pose_... object in the selected quarter, after the
+        clutter has already been generated and after goal_ has been validated.
+        """
         if self.target_voxel_file is None:
             raise RuntimeError("Target voxel file has not been selected yet.")
         if self.target_quarter_mode is None:
@@ -810,7 +1113,7 @@ class PandaTableVoxelClutterGenerator:
         )
 
         if verbose:
-            print("\n=== Target spawn diagnostics ===")
+            print("\n=== goal_pose spawn diagnostics ===")
             print(f"Target voxel file         : {self.target_voxel_file}")
             print(f"Target quarter            : {self.target_quarter_mode}")
             print(f"Target quarter bounds     : x[{qxmin:.4f}, {qxmax:.4f}] y[{qymin:.4f}, {qymax:.4f}]")
@@ -824,7 +1127,7 @@ class PandaTableVoxelClutterGenerator:
 
         for attempt_idx in range(1, max_spawn_attempts + 1):
             if verbose:
-                print(f"\n--- Target attempt {attempt_idx}/{max_spawn_attempts} ---")
+                print(f"\n--- goal_pose attempt {attempt_idx}/{max_spawn_attempts} ---")
 
             target_obj = self._spawn_one_voxel(
                 C,
@@ -832,7 +1135,7 @@ class PandaTableVoxelClutterGenerator:
                 occupied_rects=[],
                 clutter_rects=None,
                 region_modes=[self.target_quarter_mode],
-                is_target=True,
+                object_role="goal_pose",
                 force_quarter_center=True,
                 ignore_occupancy_for_target=True,
             )
@@ -846,7 +1149,7 @@ class PandaTableVoxelClutterGenerator:
 
             if base_name not in C.getFrameNames():
                 if verbose:
-                    print(f"Spawned target base frame missing right after spawn: {base_name}")
+                    print(f"Spawned goal_pose base frame missing right after spawn: {base_name}")
                 self.remove_objects(C, [target_obj])
                 continue
 
@@ -866,7 +1169,7 @@ class PandaTableVoxelClutterGenerator:
 
             if base_name not in C.getFrameNames():
                 if verbose:
-                    print("Target disappeared from config after simulation.")
+                    print("goal_pose disappeared from config after simulation.")
                 self.remove_objects(C, [target_obj])
                 continue
 
@@ -890,30 +1193,25 @@ class PandaTableVoxelClutterGenerator:
                 print(f"Inside XY bounds?         : {inside_xy}")
                 print(f"Above z threshold?        : {not_too_low}")
 
-                if not inside_xy:
-                    x_status = xmin <= x1 <= xmax
-                    y_status = ymin <= y1 <= ymax
-                    print(f"  X valid?                : {x_status}  (allowed [{xmin:.4f}, {xmax:.4f}], got {x1:.4f})")
-                    print(f"  Y valid?                : {y_status}  (allowed [{ymin:.4f}, {ymax:.4f}], got {y1:.4f})")
-
-                if not not_too_low:
-                    print(f"  Z too low               : threshold {table_top - z_tolerance:.4f}, got {z1:.4f}")
-
             if survived:
                 if verbose:
-                    print("Result                    : SUCCESS (target survived on table)")
+                    print("Result                    : SUCCESS (goal_pose survived on table)")
                 return target_obj
 
             if verbose:
-                print("Result                    : FAILED -> removing target and retrying")
+                print("Result                    : FAILED -> removing goal_pose and retrying")
 
             self.remove_objects(C, [target_obj])
 
         raise RuntimeError(
-            "Failed to spawn a target object that survives on the table."
+            "Failed to spawn a goal_pose object that survives on the table."
         )
 
     def spawn_voxels_best_effort(self, C: ry.Config, target_count):
+        """
+        target_count counts all clutter objects to be spawned in this call, including
+        the special goal_... clutter target object if it becomes eligible here.
+        """
         static_rects = list(self._scene_occupied_rects(C))
         alive_clutter_rects = self._current_alive_object_rects(C, include_target=False)
 
@@ -931,20 +1229,34 @@ class PandaTableVoxelClutterGenerator:
         self.rng.shuffle(candidate_files)
 
         spawned = []
-        attempted = set()
+        attempted_normal_files = set()
 
-        clutter_regions = (
-            self._complement_quarters(self.target_quarter_mode)
-            if self.target_quarter_mode is not None
-            else self._quarter_modes()
-        )
+        clutter_regions = self._clutter_region_modes()
 
         while len(spawned) < target_count:
             found_one = False
 
+            if self._should_spawn_goal_clutter_now():
+                goal_obj = self._spawn_one_voxel(
+                    C,
+                    self.target_voxel_file,
+                    occupied_rects=occupied_rects,
+                    clutter_rects=clutter_rects,
+                    region_modes=clutter_regions,
+                    object_role="goal",
+                    force_quarter_center=False,
+                    ignore_occupancy_for_target=False,
+                )
+                if goal_obj is not None:
+                    spawned.append(goal_obj)
+                    found_one = True
+                    continue
+                else:
+                    break
+
             for gfile in candidate_files:
                 gfile_str = str(gfile)
-                if gfile_str in attempted:
+                if gfile_str in attempted_normal_files:
                     continue
 
                 obj = self._spawn_one_voxel(
@@ -953,11 +1265,11 @@ class PandaTableVoxelClutterGenerator:
                     occupied_rects=occupied_rects,
                     clutter_rects=clutter_rects,
                     region_modes=clutter_regions,
-                    is_target=False,
+                    object_role="normal",
                     force_quarter_center=False,
                     ignore_occupancy_for_target=False,
                 )
-                attempted.add(gfile_str)
+                attempted_normal_files.add(gfile_str)
 
                 if obj is not None:
                     spawned.append(obj)
@@ -1051,6 +1363,13 @@ class PandaTableVoxelClutterGenerator:
         batch_spawn_count=5,
         max_target_spawn_attempts=40,
     ):
+        """
+        New semantics:
+          - num_voxels = number of clutter objects desired on the table
+          - that count INCLUDES exactly one goal_... object
+          - after clutter is done, one extra goal_pose_... object is spawned
+          - final total object count is at least num_voxels + 1
+        """
         C = self._load_base_scene()
         self._reset_tracking()
 
@@ -1064,11 +1383,13 @@ class PandaTableVoxelClutterGenerator:
                 "clutter_mode": self.clutter_mode,
                 "objects": self.spawned_objects,
                 "target_voxel_file": None,
-                "target_voxel_basename": None,
                 "target_original_voxel_basename": None,
                 "target_quarter_mode": None,
-                "target_object_prefix": None,
+                "goal_clutter_object_prefix": None,
+                "goal_pose_object_prefix": None,
                 "target_alpha": self.target_alpha,
+                "hardnessOfTargetObject": self.hardnessOfTargetObject,
+                "goal_clutter_insert_index": None,
             }
             return C, summary
 
@@ -1076,15 +1397,21 @@ class PandaTableVoxelClutterGenerator:
         target_quarter = self._choose_target_quarter()
         self.reserved_files.add(self.target_voxel_file)
 
+        clutter_target_count = int(num_voxels)
+        self.goal_clutter_insert_index = self._compute_goal_clutter_insert_index(clutter_target_count)
+
         print("Chosen target voxel:", os.path.basename(voxel_file))
         print("Chosen target quarter:", target_quarter)
         print("Clutter mode:", self.clutter_mode)
+        print("hardnessOfTargetObject:", self.hardnessOfTargetObject)
+        print("goal_ clutter insert index:", self.goal_clutter_insert_index)
 
-        clutter_target_count = max(0, num_voxels - 1)
+        if self.clutter_mode == "high_clutter":
+            print("Opposite clutter quarter:", self._opposite_quarter(target_quarter))
+
         initial_spawn_count = min(batch_spawn_count, clutter_target_count)
-
         initially_spawned = self.spawn_voxels_best_effort(C, initial_spawn_count)
-        print(f"Initially spawned extra voxels: {len(initially_spawned)} / {initial_spawn_count}")
+        print(f"Initially spawned clutter voxels: {len(initially_spawned)} / {initial_spawn_count}")
 
         round_idx = 0
         while True:
@@ -1095,7 +1422,7 @@ class PandaTableVoxelClutterGenerator:
 
             alive_clutter = [
                 obj for obj in self.spawned_objects
-                if obj["alive"] and not obj.get("is_target", False)
+                if obj["alive"] and obj.get("counts_as_clutter", False)
             ]
             off_clutter = [
                 obj for obj in alive_clutter
@@ -1116,14 +1443,20 @@ class PandaTableVoxelClutterGenerator:
                 )
             ]
 
+            goal_on = [obj for obj in on_clutter if obj.get("role") == "goal"]
+
+            dynamic_clutter_target = clutter_target_count + (0 if len(goal_on) == 1 else 1)
+
             print(
                 f"Clutter on table: {len(on_clutter)} | "
                 f"Off table: {len(off_clutter)} | "
-                f"Clutter target: {clutter_target_count}"
+                f"Base clutter target: {clutter_target_count} | "
+                f"Dynamic clutter target: {dynamic_clutter_target} | "
+                f"goal_ on table: {len(goal_on)}"
             )
 
-            if len(on_clutter) >= clutter_target_count:
-                print("Desired number of clutter voxels is on the table.")
+            if len(on_clutter) >= clutter_target_count and len(goal_on) == 1:
+                print("Desired clutter count is on the table, including a surviving goal_ target.")
                 break
 
             if round_idx >= max_refill_rounds:
@@ -1133,10 +1466,36 @@ class PandaTableVoxelClutterGenerator:
             if off_clutter:
                 self.remove_objects(C, off_clutter)
 
-            missing = clutter_target_count - len(on_clutter)
-            to_spawn_now = min(batch_spawn_count, missing)
+            alive_clutter_after_removal = [
+                obj for obj in self.spawned_objects
+                if obj["alive"] and obj.get("counts_as_clutter", False)
+            ]
+            on_clutter_after_removal = [
+                obj for obj in alive_clutter_after_removal
+                if self._is_object_on_table(
+                    C,
+                    obj,
+                    xy_margin=xy_margin,
+                    z_tolerance=z_tolerance,
+                )
+            ]
+            goal_on_after_removal = [
+                obj for obj in on_clutter_after_removal
+                if obj.get("role") == "goal"
+            ]
 
-            print(f"Trying to respawn up to {to_spawn_now} clutter voxel(s)...")
+            dynamic_clutter_target_after_removal = clutter_target_count + (
+                0 if len(goal_on_after_removal) == 1 else 1
+            )
+
+            missing = dynamic_clutter_target_after_removal - len(on_clutter_after_removal)
+            to_spawn_now = min(batch_spawn_count, max(0, missing))
+
+            print(
+                f"Trying to respawn up to {to_spawn_now} clutter voxel(s)... "
+                f"(goal present on table? {'yes' if len(goal_on_after_removal) == 1 else 'no'})"
+            )
+
             spawned_now = self.spawn_voxels_best_effort(C, to_spawn_now)
             print(f"Respawned {len(spawned_now)} clutter voxel(s).")
 
@@ -1146,7 +1505,7 @@ class PandaTableVoxelClutterGenerator:
 
         alive_clutter = [
             obj for obj in self.spawned_objects
-            if obj["alive"] and not obj.get("is_target", False)
+            if obj["alive"] and obj.get("counts_as_clutter", False)
         ]
         final_off_clutter = [
             obj for obj in alive_clutter
@@ -1161,8 +1520,8 @@ class PandaTableVoxelClutterGenerator:
             print(f"Removing {len(final_off_clutter)} final off-table clutter voxel(s).")
             self.remove_objects(C, final_off_clutter)
 
-        print("\n=== Spawning target last ===")
-        target_obj = self._spawn_target_voxel_surviving(
+        print("\n=== Final rescue check for goal_ ===")
+        goal_obj = self._spawn_goal_clutter_surviving(
             C,
             sim_seconds=sim_seconds,
             sim_dt=sim_dt,
@@ -1170,7 +1529,18 @@ class PandaTableVoxelClutterGenerator:
             z_tolerance=z_tolerance,
             max_spawn_attempts=max_target_spawn_attempts,
         )
-        print(f"Spawned surviving target voxel: {target_obj['basename']}")
+        print(f"Confirmed surviving goal_ voxel: {goal_obj['basename']}")
+
+        print("\n=== Spawning goal_pose last ===")
+        goal_pose_obj = self._spawn_target_voxel_surviving(
+            C,
+            sim_seconds=sim_seconds,
+            sim_dt=sim_dt,
+            xy_margin=xy_margin,
+            z_tolerance=z_tolerance,
+            max_spawn_attempts=max_target_spawn_attempts,
+        )
+        print(f"Spawned surviving goal_pose voxel: {goal_pose_obj['basename']}")
 
         final_on, final_off = self.find_objects_off_table(
             C,
@@ -1179,13 +1549,13 @@ class PandaTableVoxelClutterGenerator:
         )
 
         if final_off:
-            non_target_final_off = [
+            final_off_non_pose = [
                 obj for obj in final_off
-                if not obj.get("is_target", False)
+                if obj.get("role") != "goal_pose"
             ]
-            if non_target_final_off:
-                print(f"Removing {len(non_target_final_off)} final off-table non-target voxel(s).")
-                self.remove_objects(C, non_target_final_off)
+            if final_off_non_pose:
+                print(f"Removing {len(final_off_non_pose)} final off-table non-goal_pose voxel(s).")
+                self.remove_objects(C, final_off_non_pose)
 
         final_on, final_off = self.find_objects_off_table(
             C,
@@ -1193,9 +1563,18 @@ class PandaTableVoxelClutterGenerator:
             z_tolerance=z_tolerance,
         )
 
-        alive_target = [obj for obj in final_on if obj.get("is_target", False)]
-        if len(alive_target) != 1:
-            raise RuntimeError("Final scene does not contain exactly one on-table target object.")
+        alive_goal = [obj for obj in final_on if obj.get("role") == "goal"]
+        alive_goal_pose = [obj for obj in final_on if obj.get("role") == "goal_pose"]
+
+        if len(alive_goal) != 1:
+            raise RuntimeError(
+                "Final scene does not contain exactly one surviving on-table goal_ clutter object."
+            )
+
+        if len(alive_goal_pose) != 1:
+            raise RuntimeError(
+                "Final scene does not contain exactly one surviving on-table goal_pose_ object."
+            )
 
         summary = {
             "target": num_voxels,
@@ -1206,17 +1585,24 @@ class PandaTableVoxelClutterGenerator:
             "clutter_mode": self.clutter_mode,
             "objects": self.spawned_objects,
             "target_voxel_file": self.target_voxel_file,
-            "target_voxel_basename": (
-                f"goal_{os.path.basename(self.target_voxel_file)}"
-                if self.target_voxel_file is not None else None
-            ),
             "target_original_voxel_basename": (
                 os.path.basename(self.target_voxel_file)
                 if self.target_voxel_file is not None else None
             ),
+            "goal_clutter_voxel_basename": (
+                f"goal_{os.path.basename(self.target_voxel_file)}"
+                if self.target_voxel_file is not None else None
+            ),
+            "goal_pose_voxel_basename": (
+                f"goal_pose_{os.path.basename(self.target_voxel_file)}"
+                if self.target_voxel_file is not None else None
+            ),
             "target_quarter_mode": self.target_quarter_mode,
-            "target_object_prefix": self.target_object_prefix,
+            "goal_clutter_object_prefix": self.goal_clutter_object_prefix,
+            "goal_pose_object_prefix": self.goal_pose_object_prefix,
             "target_alpha": self.target_alpha,
+            "hardnessOfTargetObject": self.hardnessOfTargetObject,
+            "goal_clutter_insert_index": self.goal_clutter_insert_index,
         }
 
         return C, summary
@@ -1225,6 +1611,8 @@ class PandaTableVoxelClutterGenerator:
     # Save
     # =========================================================
     def save_environment(self, C: ry.Config, file_name="generated_panda_table_voxel_clutter.g"):
+        self._disable_goal_pose_contact(C)
+
         out_file = self.output_dir / file_name
         with open(out_file, "w", encoding="utf-8") as f:
             f.write(C.write())
