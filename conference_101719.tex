@@ -1,0 +1,112 @@
+\documentclass[conference]{IEEEtran}
+\IEEEoverridecommandlockouts
+
+\usepackage{cite}
+\usepackage{amsmath,amssymb,amsfonts}
+\usepackage{graphicx}
+\usepackage{textcomp}
+\usepackage{xcolor}
+\usepackage{subcaption}
+\usepackage{hyperref}
+
+\hypersetup{
+    colorlinks=true,
+    linkcolor=blue,
+    urlcolor=blue,
+    citecolor=blue
+}
+
+\begin{document}
+
+\title{Semantic-Guided Manipulation for Targeted Object Retrieval in Highly Cluttered Environments\\
+{\large Progress Report}}
+
+\author{
+    \IEEEauthorblockN{Mahyar Fardinfar}
+    \IEEEauthorblockA{mahyar.fardinfar@bilkent.edu.tr}
+    \and
+    \IEEEauthorblockN{Salman Awan}
+    \IEEEauthorblockA{s.awan@bilkent.edu.tr}
+    \and
+    \IEEEauthorblockN{Hakan Muluk}
+    \IEEEauthorblockA{hakan.muluk@bilkent.edu.tr}
+    \and
+    \IEEEauthorblockN{Pinar Gul}
+    \IEEEauthorblockA{pinar.gul@bilkent.edu.tr}
+    \and
+    \IEEEauthorblockN{Osama Awad}
+    \IEEEauthorblockA{saed.awad@bilkent.edu.tr}
+}
+
+\maketitle
+
+\begin{abstract}
+We present a robotic manipulation pipeline for targeted object retrieval in cluttered tabletop environments. Starting from a simulated scene of randomly arranged voxel objects, our system captures RGB and depth images from an overhead camera, applies SAM3-based instance segmentation to isolate individual objects, and back-projects the resulting masks with depth data to reconstruct per-object point clouds. These point clouds feed into a pose estimation model where it gives us the exact location and positioning of the target object. The grasp generation module uses this information for later proposition of candidate grasp poses, which are then executed by a Franka Panda manipulator under collision-aware motion planning. In scenarios requiring object rearrangement, the system selects among singulation and direct grasping primitives to clear a path to the target.
+\end{abstract}
+% ---------------------------------------------------------------
+\section{Environment Generation}
+% TODO: Describe the simulation environment setup using RAI/G,
+% voxel-based object generation, randomized clutter configurations,
+% batch generation pipeline, depth map and RGB image outputs, etc.
+
+% ---------------------------------------------------------------
+\section{Image Segmentation}
+
+We adopt SAM3 (Segment Anything Model 3) as the core segmentation backbone. SAM3 is a promptable segmentation model capable of producing high-quality object masks from a variety of input prompts, including points, bounding boxes, and free-form masks. Its zero-shot generalization makes it well-suited for our setting, where object categories and configurations vary across scenes.
+
+Segmentation is applied to the RGB images rendered from the simulated cluttered table environments. For each scene, we run SAM3 in automatic mask generation mode, which produces a set of candidate masks covering all visible object instances. We then filter these masks by predicted IoU score and stability score to retain only high-confidence segments.
+
+Fig.~\ref{fig:segmentation} illustrates representative segmentation results on sample cluttered scenes. The model successfully delineates individual objects even in cases of partial occlusion, producing clean, instance-level masks that serve as input to the subsequent point cloud reconstruction stage.
+
+\begin{figure}[h]
+    \centering
+    \begin{subfigure}[b]{1\columnwidth}
+        \includegraphics[width=\linewidth]{clutter_segmentation.png}
+    \end{subfigure}
+    \caption{Instance segmentation on a cluttered table scene. Each color denotes a distinct object mask produced by SAM3.}
+    \label{fig:segmentation}
+\end{figure}
+
+% ---------------------------------------------------------------
+\section{Point Cloud Generation}
+
+Given the per-object segmentation masks and the corresponding depth maps rendered from the simulation, we reconstruct individual object point clouds using back-projection. For each pixel belonging to a segmented object mask, we lift the 2D image coordinate to 3D space using the known camera intrinsic matrix and the depth value at that pixel. The resulting set of 3D points forms a partial point cloud for the object as seen from the overhead camera. This process is applied independently for each mask, yielding per-instance point clouds that encode both geometry and spatial position relative to the robot base frame.
+
+Fig.~\ref{fig:pointcloud} shows example point clouds reconstructed from segmented objects in a cluttered scene. The reconstruction faithfully captures the shape and spatial extent of each object, providing the geometric input needed for grasp generation.
+
+\begin{figure}[h]
+    \centering
+    \begin{subfigure}[b]{1\columnwidth}
+        \includegraphics[width=\linewidth]{point_cloude.png}
+    \end{subfigure}
+    \caption{Point cloud reconstruction from depth map and segmentation masks. Each color represents a distinct object's reconstructed point cloud.}
+    \label{fig:pointcloud}
+\end{figure}
+
+% ---------------------------------------------------------------
+\section{Pose Estimation}
+% TODO: Describe your approach to estimating the 3D pose of each
+% segmented object, and how this feeds into the shadow alignment task.
+
+% ---------------------------------------------------------------
+\section{Grasp Generation}
+% TODO: Describe the grasp generation pipeline (e.g., GraspNet,
+% GPR, or optimization-based approach), inputs used (point clouds),
+% and any preliminary results on grasp quality metrics.
+
+% ---------------------------------------------------------------
+\section{Manipulation}
+% TODO: Describe the motion planning and execution pipeline,
+% how manipulation primitives (grasp, push, singulate) are selected,
+% and integration with the Panda robot in simulation.
+
+% ---------------------------------------------------------------
+\section*{Team Contributions}
+% TODO: Brief summary of each team member's contributions.
+% \textbf{Mahyar Fardinfar:} Image segmentation and point cloud generation.
+% \textbf{Salman Awan:} ...
+% \textbf{Hakan Muluk:} ...
+% \textbf{Pinar Gul:} ...
+% \textbf{Osama Awad:} ...
+
+\end{document}
