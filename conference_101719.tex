@@ -87,10 +87,11 @@ Fig.~\ref{fig:pointcloud} shows example point clouds reconstructed from segmente
     \label{fig:pointcloud}
 \end{figure}
 
-% ---------------------------------------------------------------
+\section{YOLO based segmentation}
+Work is currently in progress for the YOLO based segmentation. Optimal results are not being achieved yet and need more training. Currently sample set of 2,000 images is being used for the training. The model is experiencing difficulties with overlapping objects and distinguish objects in a clutter where different voxels share similar features such as color. To improve results, expanding dataset and testing different camera viewpoints are planned as next steps.
+
 \section{Pose Estimation}
-% TODO: Describe your approach to estimating the 3D pose of each
-% segmented object, and how this feeds into the shadow alignment task.
+For pose estimation task, the target voxel and goal position is identified using environment information. As the voxels are composed of various cubes, their centroids were calculated to represent their positions. Initial point cloud generation included the point clouds of the voxels and table as well as background in the scene. To isolate the voxels from the table and background, color based filtering was initially used but it did not give good results. Therefore, spatial filtering was used to remove the point clouds of table and background. Following this, a second spatial filter was used to isolate the target voxel and goal position from other voxels. For this spheres were placed at the centroid positions. If a point is inside that sphere, it was included in the point cloud. Otherwise, it was rejected. These isolated point clouds are further utilized for grasp generation.
 
 % ---------------------------------------------------------------
 \section{Grasp Generation}
