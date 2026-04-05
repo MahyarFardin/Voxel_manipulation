@@ -49,6 +49,10 @@ We present a robotic manipulation pipeline for targeted object retrieval in clut
 % voxel-based object generation, randomized clutter configurations,
 % batch generation pipeline, depth map and RGB image outputs, etc.
 
+The simulation environments are generated in RAI using a Panda robot and tabletop scene as the base setup. The manipulated objects are voxel-based, with each object formed by combining small cube-shaped elements into a blocky 3D shape. These objects are generated beforehand and spawned on the table at randomized positions and orientations from a predefined drop height. In each environment, one object is selected as the manipulation target. A copy of this object is embedded into the clutter as the real object to be retrieved, while a transparent copy is placed on the table to indicate the desired final pose. This defines a goal-conditioned pick-and-place task in which the robot must identify the correct object in clutter, grasp it, and move it to the shown target pose.
+
+To control task difficulty, the generator supports different clutter placement modes. Random placement produces unconstrained clutter, low-clutter placement encourages greater separation between objects, and high-clutter placement produces denser groupings with stronger occlusion. After spawning, all objects are settled using physics simulation, and any objects that fall off the table are removed and respawned. Each finalized scene therefore contains a plausible clutter arrangement, one real target object inside the clutter, and one transparent goal-pose marker. In addition, every scene is rendered from five fixed camera viewpoints, producing five RGB images and five corresponding depth maps for downstream perception.
+
 % ---------------------------------------------------------------
 \section{Image Segmentation}
 
