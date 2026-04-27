@@ -28,7 +28,8 @@ class PandaTableMeshClutterGenerator:
        clutter with the frame prefix `goal_`.
     5. A copy of the same target is spawned near the center of the selected
        target quarter with the frame prefix `goal_pose_`, allowed to settle in
-       simulation, then switched to a non-contact green translucent marker.
+       simulation, then switched to a non-contact translucent marker with the
+       same color as the clutter-side target.
     6. `hardnessOfTargetObject` controls how early the clutter-side `goal_`
        target is inserted among clutter drops.
     7. The final scene is validated so that exactly one on-table `goal_` and
@@ -39,6 +40,16 @@ class PandaTableMeshClutterGenerator:
     """
 
     DEFAULT_PREFER_EXTS = (".obj", ".off", ".ply")
+    GOAL_POSE_ALPHA = 0.5
+    OFF_COLOR_PALETTE = (
+        ("red", (1.0, 0.0, 0.0)),
+        ("green", (0.0, 1.0, 0.0)),
+        ("blue", (0.0, 0.0, 1.0)),
+        ("yellow", (1.0, 1.0, 0.0)),
+        ("orange", (1.0, 0.5, 0.0)),
+        ("purple", (0.5, 0.0, 1.0)),
+        ("white", (1.0, 1.0, 1.0)),
+    )
 
     def __init__(
         self,
@@ -126,6 +137,8 @@ class PandaTableMeshClutterGenerator:
 
         self.target_object = None
         self.target_quarter_mode = None
+        self.target_color_name = None
+        self.target_rgb = None
 
         self.goal_clutter_object_prefix = None
         self.goal_pose_object_prefix = None
@@ -238,6 +251,10 @@ class PandaTableMeshClutterGenerator:
                 )
                 continue
 
+            is_colorable_off_object = (
+                len(candidates) == 1 and selected_mesh.suffix.lower() == ".off"
+            )
+
             local_min, local_max, computed_size_xyz = self._mesh_local_bounds(
                 selected_mesh,
                 float(selected_record["scale_factor"]),
@@ -259,6 +276,7 @@ class PandaTableMeshClutterGenerator:
                     ),
                     "mesh_basename": selected_mesh.name,
                     "mesh_ext": selected_mesh.suffix.lower(),
+                    "is_colorable_off_object": is_colorable_off_object,
                     "scale_factor": float(selected_record["scale_factor"]),
                     "aabb_size_xyz_after_scaling": [
                         float(v) for v in scaled_size_xyz
@@ -535,6 +553,8 @@ class PandaTableMeshClutterGenerator:
 
         self.target_object = None
         self.target_quarter_mode = None
+        self.target_color_name = None
+        self.target_rgb = None
 
         self.goal_clutter_object_prefix = None
         self.goal_pose_object_prefix = None
@@ -546,9 +566,24 @@ class PandaTableMeshClutterGenerator:
     # =========================================================
     # Target selection
     # =========================================================
+    def _choose_off_color(self):
+        idx = int(self.rng.integers(len(self.OFF_COLOR_PALETTE)))
+        color_name, rgb = self.OFF_COLOR_PALETTE[idx]
+        return color_name, [float(v) for v in rgb]
+
     def _choose_target_object(self):
-        chosen_idx = int(self.rng.integers(len(self.mesh_catalog)))
-        target = self.mesh_catalog[chosen_idx]
+        target_candidates = [
+            obj for obj in self.mesh_catalog if obj.get("is_colorable_off_object")
+        ]
+        if not target_candidates:
+            raise RuntimeError(
+                "No target candidates found: expected at least one dataset folder "
+                "with exactly one .off mesh candidate."
+            )
+
+        chosen_idx = int(self.rng.integers(len(target_candidates)))
+        target = target_candidates[chosen_idx]
+        self.target_color_name, self.target_rgb = self._choose_off_color()
         self.target_object = target
         return target
 
@@ -562,7 +597,13 @@ class PandaTableMeshClutterGenerator:
         token = re.sub(r"_+", "_", token).strip("_")
         return token or "object"
 
-    def _set_frame_rgba(self, fr, rgba):
+    def _rgba_to_uint8(self, rgba):
+        return np.array(
+            [int(round(255.0 * float(v))) for v in rgba],
+            dtype=np.uint8,
+        )
+
+    def _set_frame_rgba(self, fr, rgba, preserve_existing_rgb=False):
         rgba = [float(v) for v in rgba]
 
         if hasattr(fr, "setColor"):
@@ -576,7 +617,7 @@ class PandaTableMeshClutterGenerator:
         except Exception:
             attrs = {}
 
-        if "color" in attrs:
+        if preserve_existing_rgb and "color" in attrs:
             current = list(attrs["color"])
             if len(current) >= 3:
                 rgba = [
@@ -609,7 +650,19 @@ class PandaTableMeshClutterGenerator:
         except Exception:
             pass
 
-        self._set_frame_rgba(fr, rgba)
+        self._set_frame_rgba(fr, rgba, preserve_existing_rgb=True)
+
+    def _goal_pose_rgb_for_frame(self, frame_name: str):
+        for obj in self.spawned_objects:
+            if obj.get("alive") and obj.get("frame_name") == frame_name:
+                rgb = obj.get("rgb")
+                if rgb is not None:
+                    return [float(v) for v in rgb]
+
+        if self.target_rgb is not None:
+            return [float(v) for v in self.target_rgb]
+
+        return [0.0, 1.0, 0.0]
 
     def _disable_goal_pose_contact(self, C: ry.Config):
         if self.goal_pose_object_prefix is None:
@@ -639,7 +692,8 @@ class PandaTableMeshClutterGenerator:
                 C.delFrame(nm)
 
         fr = C.getFrame(frame_name)
-        rgba = [0.0, 1.0, 0.0, 0.4]
+        rgb = self._goal_pose_rgb_for_frame(frame_name)
+        rgba = [float(rgb[0]), float(rgb[1]), float(rgb[2]), self.GOAL_POSE_ALPHA]
         pos = np.array(fr.getPosition(), dtype=float)
         quat = np.array(fr.getQuaternion(), dtype=float)
         verts = None
@@ -664,7 +718,7 @@ class PandaTableMeshClutterGenerator:
                 verts = np.asarray(verts, dtype=float)
                 tris = np.asarray(tris, dtype=np.uint32)
                 colors = np.tile(
-                    np.array([0, 255, 0, 153], dtype=np.uint8),
+                    self._rgba_to_uint8(rgba),
                     (verts.shape[0], 1),
                 )
                 C.delFrame(frame_name)
@@ -962,6 +1016,22 @@ class PandaTableMeshClutterGenerator:
     # =========================================================
     # Spawning
     # =========================================================
+    def _spawn_color_metadata(self, mesh_info, object_role: str):
+        if not mesh_info.get("is_colorable_off_object"):
+            return None, None, None
+
+        if object_role in {"goal", "goal_pose"}:
+            if self.target_color_name is None or self.target_rgb is None:
+                self.target_color_name, self.target_rgb = self._choose_off_color()
+            color_name = str(self.target_color_name)
+            rgb = [float(v) for v in self.target_rgb]
+        else:
+            color_name, rgb = self._choose_off_color()
+
+        alpha = self.GOAL_POSE_ALPHA if object_role == "goal_pose" else 1.0
+        rgba = [float(rgb[0]), float(rgb[1]), float(rgb[2]), alpha]
+        return color_name, rgb, rgba
+
     def _spawn_one_mesh(
         self,
         C: ry.Config,
@@ -1006,13 +1076,24 @@ class PandaTableMeshClutterGenerator:
         z = float(table_info["top_z"] - local_min_z + self.spawn_height)
 
         prefix_core = f"{self.object_counter}_"
+        color_name, rgb, rgba = self._spawn_color_metadata(mesh_info, object_role)
         if object_role == "normal":
             prefix = f"obj_{prefix_core}"
         elif object_role == "goal":
-            object_token = self._frame_safe_object_token(mesh_info["object_name"])
+            token_source = (
+                f"{color_name}_{mesh_info['object_name']}"
+                if color_name is not None
+                else mesh_info["object_name"]
+            )
+            object_token = self._frame_safe_object_token(token_source)
             prefix = f"goal_{object_token}_{prefix_core}"
         elif object_role == "goal_pose":
-            object_token = self._frame_safe_object_token(mesh_info["object_name"])
+            token_source = (
+                f"{color_name}_{mesh_info['object_name']}"
+                if color_name is not None
+                else mesh_info["object_name"]
+            )
+            object_token = self._frame_safe_object_token(token_source)
             prefix = f"goal_pose_{object_token}_{prefix_core}"
         else:
             raise ValueError(f"Unknown object_role: {object_role}")
@@ -1028,11 +1109,10 @@ class PandaTableMeshClutterGenerator:
             str(mesh_info["load_mesh_path"]),
             scale=float(mesh_info["scale_factor"]),
         )
+        if rgba is not None:
+            self._set_frame_rgba(f, rgba)
         f.setContact(1)
         f.setMass(float(self.object_mass))
-
-        if object_role == "goal_pose":
-            self._set_target_alpha(C, frame_name, self.target_alpha)
 
         counts_as_clutter = object_role in {"normal", "goal"}
 
@@ -1053,10 +1133,14 @@ class PandaTableMeshClutterGenerator:
             "role": object_role,
             "counts_as_clutter": counts_as_clutter,
             "is_target_family": object_role in {"goal", "goal_pose"},
-            "target_alpha": self.target_alpha if object_role == "goal_pose" else None,
+            "target_alpha": rgba[3] if object_role == "goal_pose" and rgba is not None else None,
             "region_modes": list(region_modes),
             "clutter_mode": self.clutter_mode if counts_as_clutter else None,
             "scale_factor": float(mesh_info["scale_factor"]),
+            "color_name": color_name,
+            "rgb": rgb,
+            "rgba": rgba,
+            "is_colorable_off_object": bool(mesh_info.get("is_colorable_off_object")),
         }
 
         self.spawned_objects.append(obj_info)
@@ -1313,8 +1397,14 @@ class PandaTableMeshClutterGenerator:
                 print(f"Above z threshold?       : {not_too_low}")
 
             if survived:
-                target_obj["target_alpha"] = 0.4
-                target_obj["final_rgba"] = [0.0, 1.0, 0.0, 0.4]
+                rgb = target_obj.get("rgb") or self.target_rgb or [0.0, 1.0, 0.0]
+                target_obj["target_alpha"] = self.GOAL_POSE_ALPHA
+                target_obj["final_rgba"] = [
+                    float(rgb[0]),
+                    float(rgb[1]),
+                    float(rgb[2]),
+                    self.GOAL_POSE_ALPHA,
+                ]
                 if verbose:
                     print("Result                   : SUCCESS (goal_pose survived on table)")
                     print("Finalized goal_pose      : pending final settled-frame styling")
@@ -1523,6 +1613,8 @@ class PandaTableMeshClutterGenerator:
                 "target_quarter_mode": None,
                 "goal_clutter_object_prefix": None,
                 "goal_pose_object_prefix": None,
+                "target_color_name": None,
+                "target_rgb": None,
                 "target_alpha": self.target_alpha,
                 "hardnessOfTargetObject": self.hardnessOfTargetObject,
                 "goal_clutter_insert_index": None,
@@ -1540,6 +1632,7 @@ class PandaTableMeshClutterGenerator:
 
         print("Chosen target object:", target_object["object_name"])
         print("Chosen target mesh:", target_object["mesh_basename"])
+        print("Chosen target color:", self.target_color_name, self.target_rgb)
         print("Chosen target quarter:", target_quarter)
         print("Clutter mode:", self.clutter_mode)
         print("hardnessOfTargetObject:", self.hardnessOfTargetObject)
@@ -1754,7 +1847,9 @@ class PandaTableMeshClutterGenerator:
             "target_quarter_mode": self.target_quarter_mode,
             "goal_clutter_object_prefix": self.goal_clutter_object_prefix,
             "goal_pose_object_prefix": self.goal_pose_object_prefix,
-            "target_alpha": self.target_alpha,
+            "target_color_name": self.target_color_name,
+            "target_rgb": self.target_rgb,
+            "target_alpha": self.GOAL_POSE_ALPHA,
             "hardnessOfTargetObject": self.hardnessOfTargetObject,
             "goal_clutter_insert_index": self.goal_clutter_insert_index,
         }
