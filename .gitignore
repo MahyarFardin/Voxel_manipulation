@@ -5,6 +5,7 @@ __pycache__/
 
 # C extensions
 *.so
+*.pt
 
 # Distribution / packaging
 .Python
@@ -125,3 +126,9 @@ venv.bak/
 
 # z.log files
 z.log.*
+
+*.g
+
+*.png
+*.jpg
+*.npy

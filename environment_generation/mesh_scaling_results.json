@@ -1,0 +1,842 @@
+[
+  {
+    "mesh_path": "mesh_dataset/vase/vase_0001.off",
+    "aabb_size_xyz": [
+      9.16513,
+      9.16513,
+      17.8735
+    ],
+    "aabb_diagonal": 22.078523910891324,
+    "min_axis_before": 9.16513,
+    "max_axis_before": 17.8735,
+    "scale_factor": 0.007637643983227735,
+    "aabb_size_xyz_after_scaling": [
+      0.07,
+      0.07,
+      0.13651142973422092
+    ],
+    "min_axis_after": 0.07,
+    "max_axis_after": 0.13651142973422092,
+    "constraints": {
+      "min_axis_after_lte": 0.07,
+      "max_axis_after_lt": 0.3
+    },
+    "constraints_satisfied": true
+  },
+  {
+    "mesh_path": "mesh_dataset/guitar/guitar_0008.off",
+    "aabb_size_xyz": [
+      13.10452,
+      44.50925,
+      2.33
+    ],
+    "aabb_diagonal": 46.45676140232872,
+    "min_axis_before": 2.33,
+    "max_axis_before": 44.50925,
+    "scale_factor": 0.00674017196425462,
+    "aabb_size_xyz_after_scaling": [
+      0.08832671830901397,
+      0.29999999899999996,
+      0.015704600676713264
+    ],
+    "min_axis_after": 0.015704600676713264,
+    "max_axis_after": 0.29999999899999996,
+    "constraints": {
+      "min_axis_after_lte": 0.07,
+      "max_axis_after_lt": 0.3
+    },
+    "constraints_satisfied": true
+  },
+  {
+    "mesh_path": "mesh_dataset/whippedCream/WhippedCream_25k_tex.obj",
+    "aabb_size_xyz": [
+      59.04379844665527,
+      218.01979446411133,
+      59.985599517822266
+    ],
+    "aabb_diagonal": 233.70295903709726,
+    "min_axis_before": 59.04379844665527,
+    "max_axis_before": 218.01979446411133,
+    "scale_factor": 0.0011855605811547409,
+    "aabb_size_xyz_after_scaling": [
+      0.07,
+      0.25847567422810896,
+      0.07111656222526491
+    ],
+    "min_axis_after": 0.07,
+    "max_axis_after": 0.25847567422810896,
+    "constraints": {
+      "min_axis_after_lte": 0.07,
+      "max_axis_after_lt": 0.3
+    },
+    "constraints_satisfied": true
+  },
+  {
+    "mesh_path": "mesh_dataset/monitor/monitor_0014.off",
+    "aabb_size_xyz": [
+      27.4362,
+      53.5444,
+      52.9931
+    ],
+    "aabb_diagonal": 80.17491184535223,
+    "min_axis_before": 27.4362,
+    "max_axis_before": 53.5444,
+    "scale_factor": 0.0025513737325139783,
+    "aabb_size_xyz_after_scaling": [
+      0.07,
+      0.13661177568322147,
+      0.1352052033444865
+    ],
+    "min_axis_after": 0.07,
+    "max_axis_after": 0.13661177568322147,
+    "constraints": {
+      "min_axis_after_lte": 0.07,
+      "max_axis_after_lt": 0.3
+    },
+    "constraints_satisfied": true
+  },
+  {
+    "mesh_path": "mesh_dataset/deodorant/Deodorant_25k_tex.obj",
+    "aabb_size_xyz": [
+      47.44890022277832,
+      100.34640121459961,
+      47.59630012512207
+    ],
+    "aabb_diagonal": 120.77336690956854,
+    "min_axis_before": 47.44890022277832,
+    "max_axis_before": 100.34640121459961,
+    "scale_factor": 0.0014752712849263427,
+    "aabb_size_xyz_after_scaling": [
+      0.07,
+      0.1480381642575967,
+      0.07021745484332868
+    ],
+    "min_axis_after": 0.07,
+    "max_axis_after": 0.1480381642575967,
+    "constraints": {
+      "min_axis_after_lte": 0.07,
+      "max_axis_after_lt": 0.3
+    },
+    "constraints_satisfied": true
+  },
+  {
+    "mesh_path": "mesh_dataset/xbox/xbox_0001.off",
+    "aabb_size_xyz": [
+      29.839899999999997,
+      8.533200000000004,
+      32.191648
+    ],
+    "aabb_diagonal": 44.71618650115307,
+    "min_axis_before": 8.533200000000004,
+    "max_axis_before": 32.191648,
+    "scale_factor": 0.00820325317583087,
+    "aabb_size_xyz_after_scaling": [
+      0.24478425444147553,
+      0.07,
+      0.2640762386912295
+    ],
+    "min_axis_after": 0.07,
+    "max_axis_after": 0.2640762386912295,
+    "constraints": {
+      "min_axis_after_lte": 0.07,
+      "max_axis_after_lt": 0.3
+    },
+    "constraints_satisfied": true
+  },
+  {
+    "mesh_path": "mesh_dataset/bottle/Sprudelflasche_25k_tex.obj",
+    "aabb_size_xyz": [
+      80.35219764709473,
+      292.73600006103516,
+      80.5270004272461
+    ],
+    "aabb_diagonal": 314.062794988935,
+    "min_axis_before": 80.35219764709473,
+    "max_axis_before": 292.73600006103516,
+    "scale_factor": 0.0008711647229294043,
+    "aabb_size_xyz_after_scaling": [
+      0.07,
+      0.2550212763846338,
+      0.07015228201553786
+    ],
+    "min_axis_after": 0.07,
+    "max_axis_after": 0.2550212763846338,
+    "constraints": {
+      "min_axis_after_lte": 0.07,
+      "max_axis_after_lt": 0.3
+    },
+    "constraints_satisfied": true
+  },
+  {
+    "mesh_path": "mesh_dataset/bed/bed_0003.off",
+    "aabb_size_xyz": [
+      38.5827,
+      81.1024,
+      47.2441
+    ],
+    "aabb_diagonal": 101.48019023366088,
+    "min_axis_before": 38.5827,
+    "max_axis_before": 81.1024,
+    "scale_factor": 0.001814284640525417,
+    "aabb_size_xyz_after_scaling": [
+      0.07,
+      0.14714283862974858,
+      0.08571424498544686
+    ],
+    "min_axis_after": 0.07,
+    "max_axis_after": 0.14714283862974858,
+    "constraints": {
+      "min_axis_after_lte": 0.07,
+      "max_axis_after_lt": 0.3
+    },
+    "constraints_satisfied": true
+  },
+  {
+    "mesh_path": "mesh_dataset/doveBeautyBar/optimized_poisson_textured_mesh.ply",
+    "aabb_size_xyz": [
+      0.11700129881501198,
+      0.14525168389081955,
+      0.10616951808333397
+    ],
+    "aabb_diagonal": 0.21461435685332347,
+    "min_axis_before": 0.10616951808333397,
+    "max_axis_before": 0.14525168389081955,
+    "scale_factor": 0.6593229512924417,
+    "aabb_size_xyz_after_scaling": [
+      0.07714164163976256,
+      0.09576776890309195,
+      0.07
+    ],
+    "min_axis_after": 0.07,
+    "max_axis_after": 0.09576776890309195,
+    "constraints": {
+      "min_axis_after_lte": 0.07,
+      "max_axis_after_lt": 0.3
+    },
+    "constraints_satisfied": true
+  },
+  {
+    "mesh_path": "mesh_dataset/doveBeautyBar/optimized_poisson_texture_mapped_mesh.obj",
+    "aabb_size_xyz": [
+      0.11700129881501198,
+      0.14525169879198074,
+      0.10616952832788229
+    ],
+    "aabb_diagonal": 0.2146143720064456,
+    "min_axis_before": 0.10616952832788229,
+    "max_axis_before": 0.14525169879198074,
+    "scale_factor": 0.6593228876728142,
+    "aabb_size_xyz_after_scaling": [
+      0.07714163419618351,
+      0.09576776948691057,
+      0.07
+    ],
+    "min_axis_after": 0.07,
+    "max_axis_after": 0.09576776948691057,
+    "constraints": {
+      "min_axis_after_lte": 0.07,
+      "max_axis_after_lt": 0.3
+    },
+    "constraints_satisfied": true
+  },
+  {
+    "mesh_path": "mesh_dataset/chair/chair_0003.off",
+    "aabb_size_xyz": [
+      430.52599999999995,
+      463.587,
+      937.54918
+    ],
+    "aabb_diagonal": 1131.045537617152,
+    "min_axis_before": 430.52599999999995,
+    "max_axis_before": 937.54918,
+    "scale_factor": 0.00016259180630205845,
+    "aabb_size_xyz_after_scaling": [
+      0.07,
+      0.07537544770815237,
+      0.15243781467321374
+    ],
+    "min_axis_after": 0.07,
+    "max_axis_after": 0.15243781467321374,
+    "constraints": {
+      "min_axis_after_lte": 0.07,
+      "max_axis_after_lt": 0.3
+    },
+    "constraints_satisfied": true
+  },
+  {
+    "mesh_path": "mesh_dataset/lamp/lamp_0001.off",
+    "aabb_size_xyz": [
+      257.752,
+      257.752,
+      341.0
+    ],
+    "aabb_diagonal": 499.1524686986933,
+    "min_axis_before": 257.752,
+    "max_axis_before": 341.0,
+    "scale_factor": 0.0002715788820261337,
+    "aabb_size_xyz_after_scaling": [
+      0.07,
+      0.07,
+      0.09260839877091159
+    ],
+    "min_axis_after": 0.07,
+    "max_axis_after": 0.09260839877091159,
+    "constraints": {
+      "min_axis_after_lte": 0.07,
+      "max_axis_after_lt": 0.3
+    },
+    "constraints_satisfied": true
+  },
+  {
+    "mesh_path": "mesh_dataset/shampoo/Shampoo_25k_tex.obj",
+    "aabb_size_xyz": [
+      47.87269973754883,
+      183.14580154418945,
+      66.4271011352539
+    ],
+    "aabb_diagonal": 200.61590108627578,
+    "min_axis_before": 47.87269973754883,
+    "max_axis_before": 183.14580154418945,
+    "scale_factor": 0.0014622112474073753,
+    "aabb_size_xyz_after_scaling": [
+      0.07,
+      0.26779785093335284,
+      0.09713045441263549
+    ],
+    "min_axis_after": 0.07,
+    "max_axis_after": 0.26779785093335284,
+    "constraints": {
+      "min_axis_after_lte": 0.07,
+      "max_axis_after_lt": 0.3
+    },
+    "constraints_satisfied": true
+  },
+  {
+    "mesh_path": "mesh_dataset/firefighterFigure/firefighterFigure_0001.off",
+    "aabb_size_xyz": [
+      13.6861,
+      61.3832,
+      36.1389
+    ],
+    "aabb_diagonal": 72.53431373260521,
+    "min_axis_before": 13.6861,
+    "max_axis_before": 61.3832,
+    "scale_factor": 0.004887330719154426,
+    "aabb_size_xyz_after_scaling": [
+      0.06688849695541939,
+      0.29999999899999996,
+      0.17662275612644987
+    ],
+    "min_axis_after": 0.06688849695541939,
+    "max_axis_after": 0.29999999899999996,
+    "constraints": {
+      "min_axis_after_lte": 0.07,
+      "max_axis_after_lt": 0.3
+    },
+    "constraints_satisfied": true
+  },
+  {
+    "mesh_path": "mesh_dataset/oreoBox/optimized_poisson_textured_mesh.ply",
+    "aabb_size_xyz": [
+      0.1470552161335945,
+      0.16356516629457474,
+      0.1577526144683361
+    ],
+    "aabb_diagonal": 0.2706745048737793,
+    "min_axis_before": 0.1470552161335945,
+    "max_axis_before": 0.16356516629457474,
+    "scale_factor": 0.4760116767052143,
+    "aabb_size_xyz_after_scaling": [
+      0.07,
+      0.07785892905844773,
+      0.07509208651770392
+    ],
+    "min_axis_after": 0.07,
+    "max_axis_after": 0.07785892905844773,
+    "constraints": {
+      "min_axis_after_lte": 0.07,
+      "max_axis_after_lt": 0.3
+    },
+    "constraints_satisfied": true
+  },
+  {
+    "mesh_path": "mesh_dataset/oreoBox/optimized_poisson_texture_mapped_mesh.obj",
+    "aabb_size_xyz": [
+      0.14705520495772362,
+      0.16356509923934937,
+      0.1577529739588499
+    ],
+    "aabb_diagonal": 0.2706746677973354,
+    "min_axis_before": 0.14705520495772362,
+    "max_axis_before": 0.16356509923934937,
+    "scale_factor": 0.47601171288105076,
+    "aabb_size_xyz_after_scaling": [
+      0.07,
+      0.07785890305648174,
+      0.07509226334623194
+    ],
+    "min_axis_after": 0.07,
+    "max_axis_after": 0.07785890305648174,
+    "constraints": {
+      "min_axis_after_lte": 0.07,
+      "max_axis_after_lt": 0.3
+    },
+    "constraints_satisfied": true
+  },
+  {
+    "mesh_path": "mesh_dataset/book/optimized_poisson_textured_mesh.ply",
+    "aabb_size_xyz": [
+      0.052589841187000275,
+      0.10411037504673004,
+      0.17598249576985836
+    ],
+    "aabb_diagonal": 0.21112674014873842,
+    "min_axis_before": 0.052589841187000275,
+    "max_axis_before": 0.17598249576985836,
+    "scale_factor": 1.331055550274287,
+    "aabb_size_xyz_after_scaling": [
+      0.07,
+      0.13857669254708765,
+      0.23424247774559118
+    ],
+    "min_axis_after": 0.07,
+    "max_axis_after": 0.23424247774559118,
+    "constraints": {
+      "min_axis_after_lte": 0.07,
+      "max_axis_after_lt": 0.3
+    },
+    "constraints_satisfied": true
+  },
+  {
+    "mesh_path": "mesh_dataset/book/optimized_poisson_texture_mapped_mesh.obj",
+    "aabb_size_xyz": [
+      0.05258989101275802,
+      0.10411029867827892,
+      0.17598277796059847
+    ],
+    "aabb_diagonal": 0.2111269501185093,
+    "min_axis_before": 0.05258989101275802,
+    "max_axis_before": 0.17598277796059847,
+    "scale_factor": 1.331054289179234,
+    "aabb_size_xyz_after_scaling": [
+      0.07,
+      0.1385764596034543,
+      0.2342426314261314
+    ],
+    "min_axis_after": 0.07,
+    "max_axis_after": 0.2342426314261314,
+    "constraints": {
+      "min_axis_after_lte": 0.07,
+      "max_axis_after_lt": 0.3
+    },
+    "constraints_satisfied": true
+  },
+  {
+    "mesh_path": "mesh_dataset/cone/cone_0001.off",
+    "aabb_size_xyz": [
+      9.875,
+      9.875,
+      15.875
+    ],
+    "aabb_diagonal": 21.143483038515676,
+    "min_axis_before": 9.875,
+    "max_axis_before": 15.875,
+    "scale_factor": 0.0070886075949367095,
+    "aabb_size_xyz_after_scaling": [
+      0.07,
+      0.07,
+      0.11253164556962027
+    ],
+    "min_axis_after": 0.07,
+    "max_axis_after": 0.11253164556962027,
+    "constraints": {
+      "min_axis_after_lte": 0.07,
+      "max_axis_after_lt": 0.3
+    },
+    "constraints_satisfied": true
+  },
+  {
+    "mesh_path": "mesh_dataset/toothpaste/Toothpaste_25k_tex.obj",
+    "aabb_size_xyz": [
+      34.76430034637451,
+      140.8926010131836,
+      45.6481990814209
+    ],
+    "aabb_diagonal": 152.12836579090077,
+    "min_axis_before": 34.76430034637451,
+    "max_axis_before": 140.8926010131836,
+    "scale_factor": 0.0020135598675237007,
+    "aabb_size_xyz_after_scaling": [
+      0.07,
+      0.2836956870311756,
+      0.09191538169508139
+    ],
+    "min_axis_after": 0.07,
+    "max_axis_after": 0.2836956870311756,
+    "constraints": {
+      "min_axis_after_lte": 0.07,
+      "max_axis_after_lt": 0.3
+    },
+    "constraints_satisfied": true
+  },
+  {
+    "mesh_path": "mesh_dataset/stairs/stairs_0005.off",
+    "aabb_size_xyz": [
+      3.0400000000000027,
+      11.35566,
+      10.52482
+    ],
+    "aabb_diagonal": 15.778607355150202,
+    "min_axis_before": 3.0400000000000027,
+    "max_axis_before": 11.35566,
+    "scale_factor": 0.023026315789473666,
+    "aabb_size_xyz_after_scaling": [
+      0.07,
+      0.2614790131578945,
+      0.24234782894736823
+    ],
+    "min_axis_after": 0.07,
+    "max_axis_after": 0.2614790131578945,
+    "constraints": {
+      "min_axis_after_lte": 0.07,
+      "max_axis_after_lt": 0.3
+    },
+    "constraints_satisfied": true
+  },
+  {
+    "mesh_path": "mesh_dataset/orangeMarmelade/OrangeMarmelade_25k_tex.obj",
+    "aabb_size_xyz": [
+      78.54929733276367,
+      96.43830108642578,
+      78.53980255126953
+    ],
+    "aabb_diagonal": 147.10145686803864,
+    "min_axis_before": 78.53980255126953,
+    "max_axis_before": 96.43830108642578,
+    "scale_factor": 0.0008912678377858809,
+    "aabb_size_xyz_after_scaling": [
+      0.07000846239337254,
+      0.08595235608904248,
+      0.07
+    ],
+    "min_axis_after": 0.07,
+    "max_axis_after": 0.08595235608904248,
+    "constraints": {
+      "min_axis_after_lte": 0.07,
+      "max_axis_after_lt": 0.3
+    },
+    "constraints_satisfied": true
+  },
+  {
+    "mesh_path": "mesh_dataset/fishBibelot/Fish_25k_tex.obj",
+    "aabb_size_xyz": [
+      102.26589965820312,
+      79.7765998840332,
+      137.96670150756836
+    ],
+    "aabb_diagonal": 189.3605841954372,
+    "min_axis_before": 79.7765998840332,
+    "max_axis_before": 137.96670150756836,
+    "scale_factor": 0.00087745028118214,
+    "aabb_size_xyz_after_scaling": [
+      0.08973324241043484,
+      0.07,
+      0.12105892103158823
+    ],
+    "min_axis_after": 0.07,
+    "max_axis_after": 0.12105892103158823,
+    "constraints": {
+      "min_axis_after_lte": 0.07,
+      "max_axis_after_lt": 0.3
+    },
+    "constraints_satisfied": true
+  },
+  {
+    "mesh_path": "mesh_dataset/car/car_0001.off",
+    "aabb_size_xyz": [
+      326.2678,
+      760.1038,
+      265.6289
+    ],
+    "aabb_diagonal": 868.7733747108564,
+    "min_axis_before": 265.6289,
+    "max_axis_before": 760.1038,
+    "scale_factor": 0.0002635255425896806,
+    "aabb_size_xyz_after_scaling": [
+      0.08597989902454141,
+      0.20030676631947808,
+      0.07
+    ],
+    "min_axis_after": 0.07,
+    "max_axis_after": 0.20030676631947808,
+    "constraints": {
+      "min_axis_after_lte": 0.07,
+      "max_axis_after_lt": 0.3
+    },
+    "constraints_satisfied": true
+  },
+  {
+    "mesh_path": "mesh_dataset/redCup/RedCup_25k_tex.obj",
+    "aabb_size_xyz": [
+      94.4015007019043,
+      81.37320137023926,
+      74.17959785461426
+    ],
+    "aabb_diagonal": 145.03742266699805,
+    "min_axis_before": 74.17959785461426,
+    "max_axis_before": 94.4015007019043,
+    "scale_factor": 0.0009436556954271185,
+    "aabb_size_xyz_after_scaling": [
+      0.08908251379421911,
+      0.07678828492816409,
+      0.07
+    ],
+    "min_axis_after": 0.07,
+    "max_axis_after": 0.08908251379421911,
+    "constraints": {
+      "min_axis_after_lte": 0.07,
+      "max_axis_after_lt": 0.3
+    },
+    "constraints_satisfied": true
+  },
+  {
+    "mesh_path": "mesh_dataset/chocolate/ChocolateBars_25k_tex.obj",
+    "aabb_size_xyz": [
+      59.81760025024414,
+      138.26850128173828,
+      96.4114990234375
+    ],
+    "aabb_diagonal": 178.86168088873134,
+    "min_axis_before": 59.81760025024414,
+    "max_axis_before": 138.26850128173828,
+    "scale_factor": 0.0011702241431812421,
+    "aabb_size_xyz_after_scaling": [
+      0.07,
+      0.16180513844137667,
+      0.11282306383752132
+    ],
+    "min_axis_after": 0.07,
+    "max_axis_after": 0.16180513844137667,
+    "constraints": {
+      "min_axis_after_lte": 0.07,
+      "max_axis_after_lt": 0.3
+    },
+    "constraints_satisfied": true
+  },
+  {
+    "mesh_path": "mesh_dataset/table/table_0013.off",
+    "aabb_size_xyz": [
+      41.99998,
+      51.00002,
+      30.0
+    ],
+    "aabb_diagonal": 72.56032221538712,
+    "min_axis_before": 30.0,
+    "max_axis_before": 51.00002,
+    "scale_factor": 0.0023333333333333335,
+    "aabb_size_xyz_after_scaling": [
+      0.09799995333333335,
+      0.11900004666666668,
+      0.07
+    ],
+    "min_axis_after": 0.07,
+    "max_axis_after": 0.11900004666666668,
+    "constraints": {
+      "min_axis_after_lte": 0.07,
+      "max_axis_after_lt": 0.3
+    },
+    "constraints_satisfied": true
+  },
+  {
+    "mesh_path": "mesh_dataset/laptop/laptop_0006.off",
+    "aabb_size_xyz": [
+      36.6123,
+      26.340200000000003,
+      23.92749
+    ],
+    "aabb_diagonal": 51.056747105843904,
+    "min_axis_before": 23.92749,
+    "max_axis_before": 36.6123,
+    "scale_factor": 0.0029255053497044617,
+    "aabb_size_xyz_after_scaling": [
+      0.10710947951498466,
+      0.07705839601228547,
+      0.07
+    ],
+    "min_axis_after": 0.07,
+    "max_axis_after": 0.10710947951498466,
+    "constraints": {
+      "min_axis_after_lte": 0.07,
+      "max_axis_after_lt": 0.3
+    },
+    "constraints_satisfied": true
+  },
+  {
+    "mesh_path": "mesh_dataset/glue/optimized_poisson_textured_mesh.ply",
+    "aabb_size_xyz": [
+      0.04300382733345032,
+      0.05298776552081108,
+      0.12971139885485172
+    ],
+    "aabb_diagonal": 0.1465676616893921,
+    "min_axis_before": 0.04300382733345032,
+    "max_axis_before": 0.12971139885485172,
+    "scale_factor": 1.6277620932951438,
+    "aabb_size_xyz_after_scaling": [
+      0.07,
+      0.08625147612318769,
+      0.21113929812421475
+    ],
+    "min_axis_after": 0.07,
+    "max_axis_after": 0.21113929812421475,
+    "constraints": {
+      "min_axis_after_lte": 0.07,
+      "max_axis_after_lt": 0.3
+    },
+    "constraints_satisfied": true
+  },
+  {
+    "mesh_path": "mesh_dataset/glue/optimized_poisson_texture_mapped_mesh.obj",
+    "aabb_size_xyz": [
+      0.04300390090793371,
+      0.05298770032823086,
+      0.12971129664219916
+    ],
+    "aabb_diagonal": 0.14656756925041217,
+    "min_axis_before": 0.04300390090793371,
+    "max_axis_before": 0.12971129664219916,
+    "scale_factor": 1.6277593083906914,
+    "aabb_size_xyz_after_scaling": [
+      0.07,
+      0.08625122243949428,
+      0.21113877051276592
+    ],
+    "min_axis_after": 0.07,
+    "max_axis_after": 0.21113877051276592,
+    "constraints": {
+      "min_axis_after_lte": 0.07,
+      "max_axis_after_lt": 0.3
+    },
+    "constraints_satisfied": true
+  },
+  {
+    "mesh_path": "mesh_dataset/piano/piano_0007.off",
+    "aabb_size_xyz": [
+      261.1431,
+      317.27470000000005,
+      306.47
+    ],
+    "aabb_diagonal": 512.6234630191053,
+    "min_axis_before": 261.1431,
+    "max_axis_before": 317.27470000000005,
+    "scale_factor": 0.00026805226712863563,
+    "aabb_size_xyz_after_scaling": [
+      0.07,
+      0.08504620263755774,
+      0.08214997830691297
+    ],
+    "min_axis_after": 0.07,
+    "max_axis_after": 0.08504620263755774,
+    "constraints": {
+      "min_axis_after_lte": 0.07,
+      "max_axis_after_lt": 0.3
+    },
+    "constraints_satisfied": true
+  },
+  {
+    "mesh_path": "mesh_dataset/crackerBox/visual_hull_refined_smoothed.obj",
+    "aabb_size_xyz": [
+      0.12902569770812988,
+      0.16640180349349976,
+      0.23232228637667163
+    ],
+    "aabb_diagonal": 0.3135455877894684,
+    "min_axis_before": 0.12902569770812988,
+    "max_axis_before": 0.23232228637667163,
+    "scale_factor": 0.5425275836008079,
+    "aabb_size_xyz_after_scaling": [
+      0.07,
+      0.0902775683561449,
+      0.12604124864455055
+    ],
+    "min_axis_after": 0.07,
+    "max_axis_after": 0.12604124864455055,
+    "constraints": {
+      "min_axis_after_lte": 0.07,
+      "max_axis_after_lt": 0.3
+    },
+    "constraints_satisfied": true
+  },
+  {
+    "mesh_path": "mesh_dataset/pencilPackage/optimized_poisson_textured_mesh.ply",
+    "aabb_size_xyz": [
+      0.10311365872621536,
+      0.05907386168837547,
+      0.12011462356895208
+    ],
+    "aabb_diagonal": 0.16896647758000632,
+    "min_axis_before": 0.05907386168837547,
+    "max_axis_before": 0.12011462356895208,
+    "scale_factor": 1.1849572382665916,
+    "aabb_size_xyz_after_scaling": [
+      0.12218527627178,
+      0.07,
+      0.14233069261969672
+    ],
+    "min_axis_after": 0.07,
+    "max_axis_after": 0.14233069261969672,
+    "constraints": {
+      "min_axis_after_lte": 0.07,
+      "max_axis_after_lt": 0.3
+    },
+    "constraints_satisfied": true
+  },
+  {
+    "mesh_path": "mesh_dataset/pencilPackage/optimized_poisson_texture_mapped_mesh.obj",
+    "aabb_size_xyz": [
+      0.10311369970440865,
+      0.059073899406939745,
+      0.12011512042954564
+    ],
+    "aabb_diagonal": 0.16896686898228436,
+    "min_axis_before": 0.059073899406939745,
+    "max_axis_before": 0.12011512042954564,
+    "scale_factor": 1.1849564816738118,
+    "aabb_size_xyz_after_scaling": [
+      0.12218524681410604,
+      0.07,
+      0.1423311905000206
+    ],
+    "min_axis_after": 0.07,
+    "max_axis_after": 0.1423311905000206,
+    "constraints": {
+      "min_axis_after_lte": 0.07,
+      "max_axis_after_lt": 0.3
+    },
+    "constraints_satisfied": true
+  },
+  {
+    "mesh_path": "mesh_dataset/airplane/airplane_0001.off",
+    "aabb_size_xyz": [
+      357.953,
+      289.6399,
+      116.129684
+    ],
+    "aabb_diagonal": 474.8765369935114,
+    "min_axis_before": 116.129684,
+    "max_axis_before": 357.953,
+    "scale_factor": 0.000602774394873924,
+    "aabb_size_xyz_after_scaling": [
+      0.2157649029683057,
+      0.17458751545384385,
+      0.07
+    ],
+    "min_axis_after": 0.07,
+    "max_axis_after": 0.2157649029683057,
+    "constraints": {
+      "min_axis_after_lte": 0.07,
+      "max_axis_after_lt": 0.3
+    },
+    "constraints_satisfied": true
+  }
+]

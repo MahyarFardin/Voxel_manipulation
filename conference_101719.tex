@@ -1,0 +1,123 @@
+\documentclass[conference]{IEEEtran}
+\IEEEoverridecommandlockouts
+
+\usepackage{cite}
+\usepackage{amsmath,amssymb,amsfonts}
+\usepackage{graphicx}
+\usepackage{textcomp}
+\usepackage{xcolor}
+\usepackage{subcaption}
+\usepackage{hyperref}
+
+\hypersetup{
+    colorlinks=true,
+    linkcolor=blue,
+    urlcolor=blue,
+    citecolor=blue
+}
+
+\begin{document}
+
+\title{Semantic-Guided Manipulation for Targeted Object Retrieval in Highly Cluttered Environments\\
+{\large Progress Report}}
+
+\author{
+    \IEEEauthorblockN{Mahyar Fardinfar}
+    \IEEEauthorblockA{mahyar.fardinfar@bilkent.edu.tr}
+    \and
+    \IEEEauthorblockN{Salman Awan}
+    \IEEEauthorblockA{s.awan@bilkent.edu.tr}
+    \and
+    \IEEEauthorblockN{Hakan Muluk}
+    \IEEEauthorblockA{hakan.muluk@bilkent.edu.tr}
+    \and
+    \IEEEauthorblockN{Pinar Gul}
+    \IEEEauthorblockA{pinar.gul@bilkent.edu.tr}
+    \and
+    \IEEEauthorblockN{Osama Awad}
+    \IEEEauthorblockA{saed.awad@bilkent.edu.tr}
+}
+
+\maketitle
+
+\begin{abstract}
+We present a robotic manipulation pipeline for targeted object retrieval in cluttered tabletop environments. Starting from a simulated scene of randomly arranged voxel objects, our system captures RGB and depth images from an overhead camera, applies SAM3-based instance segmentation to isolate individual objects, and back-projects the resulting masks with depth data to reconstruct per-object point clouds. These point clouds feed into a pose estimation model where it gives us the exact location and positioning of the target object. The grasp generation module uses this information for later proposition of candidate grasp poses, which are then executed by a Franka Panda manipulator under collision-aware motion planning. In scenarios requiring object rearrangement, the system selects among singulation and direct grasping primitives to clear a path to the target.
+\end{abstract}
+% ---------------------------------------------------------------
+\section{Environment Generation}
+% TODO: Describe the simulation environment setup using RAI/G,
+% voxel-based object generation, randomized clutter configurations,
+% batch generation pipeline, depth map and RGB image outputs, etc.
+
+The simulation environments are generated in RAI using a Panda robot and tabletop scene as the base setup. The manipulated objects are voxel-based, with each object formed by combining small cube-shaped elements into a blocky 3D shape. These objects are generated beforehand and spawned on the table at randomized positions and orientations from a predefined drop height. In each environment, one object is selected as the manipulation target. A copy of this object is embedded into the clutter as the real object to be retrieved, while a transparent copy is placed on the table to indicate the desired final pose. This defines a goal-conditioned pick-and-place task in which the robot must identify the correct object in clutter, grasp it, and move it to the shown target pose.
+
+To control task difficulty, the generator supports different clutter placement modes. Random placement produces unconstrained clutter, low-clutter placement encourages greater separation between objects, and high-clutter placement produces denser groupings with stronger occlusion. After spawning, all objects are settled using physics simulation, and any objects that fall off the table are removed and respawned. Each finalized scene therefore contains a plausible clutter arrangement, one real target object inside the clutter, and one transparent goal-pose marker. In addition, every scene is rendered from five fixed camera viewpoints, producing five RGB images and five corresponding depth maps for downstream perception.
+
+% ---------------------------------------------------------------
+\section{Image Segmentation}
+
+We adopt SAM3 (Segment Anything Model 3) as the core segmentation backbone. SAM3 is a promptable segmentation model capable of producing high-quality object masks from a variety of input prompts, including points, bounding boxes, and free-form masks. Its zero-shot generalization makes it well-suited for our setting, where object categories and configurations vary across scenes.
+
+Segmentation is applied to the RGB images rendered from the simulated cluttered table environments. For each scene, we run SAM3 in automatic mask generation mode, which produces a set of candidate masks covering all visible object instances. We then filter these masks by predicted IoU score and stability score to retain only high-confidence segments.
+
+Fig.~\ref{fig:segmentation} illustrates representative segmentation results on sample cluttered scenes. The model successfully delineates individual objects even in cases of partial occlusion, producing clean, instance-level masks that serve as input to the subsequent point cloud reconstruction stage.
+
+\begin{figure}[h]
+    \centering
+    \begin{subfigure}[b]{1\columnwidth}
+        \includegraphics[width=\linewidth]{clutter_segmentation.png}
+    \end{subfigure}
+    \caption{Instance segmentation on a cluttered table scene. Each color denotes a distinct object mask produced by SAM3.}
+    \label{fig:segmentation}
+\end{figure}
+
+% ---------------------------------------------------------------
+\section{Point Cloud Generation}
+
+Given the per-object segmentation masks and the corresponding depth maps rendered from the simulation, we reconstruct individual object point clouds using back-projection. For each pixel belonging to a segmented object mask, we lift the 2D image coordinate to 3D space using the known camera intrinsic matrix and the depth value at that pixel. The resulting set of 3D points forms a partial point cloud for the object as seen from the overhead camera. This process is applied independently for each mask, yielding per-instance point clouds that encode both geometry and spatial position relative to the robot base frame.
+
+Fig.~\ref{fig:pointcloud} shows example point clouds reconstructed from segmented objects in a cluttered scene. The reconstruction faithfully captures the shape and spatial extent of each object, providing the geometric input needed for grasp generation.
+
+\begin{figure}[h]
+    \centering
+    \begin{subfigure}[b]{1\columnwidth}
+        \includegraphics[width=\linewidth]{point_cloude.png}
+    \end{subfigure}
+    \caption{Point cloud reconstruction from depth map and segmentation masks. Each color represents a distinct object's reconstructed point cloud.}
+    \label{fig:pointcloud}
+\end{figure}
+
+\section{YOLO based segmentation}
+Work is currently in progress for the YOLO based segmentation. Optimal results are not being achieved yet and need more training. Currently sample set of 2,000 images is being used for the training. The model is experiencing difficulties with overlapping objects and distinguish objects in a clutter where different voxels share similar features such as color. To improve results, expanding dataset and testing different camera viewpoints are planned as next steps.
+
+\section{Pose Estimation}
+For pose estimation task, the target voxel and goal position is identified using environment information. As the voxels are composed of various cubes, their centroids were calculated to represent their positions. Initial point cloud generation included the point clouds of the voxels and table as well as background in the scene. To isolate the voxels from the table and background, color based filtering was initially used but it did not give good results. Therefore, spatial filtering was used to remove the point clouds of table and background. Following this, a second spatial filter was used to isolate the target voxel and goal position from other voxels. For this spheres were placed at the centroid positions. If a point is inside that sphere, it was included in the point cloud. Otherwise, it was rejected. These isolated point clouds are further utilized for grasp generation.
+
+% ---------------------------------------------------------------
+\section{Grasp Generation}
+% TODO: Describe the grasp generation pipeline (e.g., GraspNet,
+% GPR, or optimization-based approach), inputs used (point clouds),
+% and any preliminary results on grasp quality metrics.
+
+% ---------------------------------------------------------------
+Once the target object's point cloud is available, grasp generation is performed directly on this 3D geometry using a surface-normal-based heuristic. The point cloud is first downsampled with voxel grid filtering in order to reduce noise and make the later computations more stable. Surface normals are then estimated on the downsampled cloud using local neighborhood information. Since raw normal estimation may produce inconsistent directions, a reorientation step is applied so that the normals become more coherent over the visible surface of the object.
+
+Candidate grasps are generated by considering pairs of points on the processed point cloud. For each pair, we first check whether the distance between the two points falls within a feasible range for a parallel-jaw gripper. We then compute the angle between their normals and retain only the pairs whose normals are nearly opposite. In addition, we examine the line connecting the two candidate contact points and verify that the surface normals are directionally compatible with this line. This favors point pairs that better match the expected closing direction of the gripper and approximates an antipodal grasp condition.
+
+Among the valid candidates, the final grasp is selected using a simple centroid-based heuristic. For each pair, we compute the midpoint of the two contact points and prefer the candidate whose midpoint is closest to the centroid of the target point cloud. This choice is intended to avoid unstable grasps near boundary regions and to favor more central contacts on the visible object surface. The output of this stage is a pair of 3D grasp contact points together with their associated surface normals. These are used as the grasp proposal for the downstream manipulation stage.
+\section{Manipulation}
+% TODO: Describe the motion planning and execution pipeline,
+% how manipulation primitives (grasp, push, singulate) are selected,
+% and integration with the Panda robot in simulation.
+
+% ---------------------------------------------------------------
+\section*{Team Contributions}
+% TODO: Brief summary of each team member's contributions.
+% \textbf{Mahyar Fardinfar:} Image segmentation and point cloud generation.
+% \textbf{Salman Awan:} ...
+% \textbf{Hakan Muluk:} ...
+\textbf{Pinar Gul:} Grasp point generation from the target object's point cloud, including surface normal estimation, candidate contact pair generation, and grasp selection.\\
+
+% \textbf{Osama Awad:} ...
+
+\end{document}
