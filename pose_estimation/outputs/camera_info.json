@@ -1,0 +1,247 @@
+{
+  "cam_dim_0": {
+    "K": [
+      [
+        4635.2900390625,
+        0.0,
+        960.0
+      ],
+      [
+        0.0,
+        4635.2900390625,
+        960.0
+      ],
+      [
+        0.0,
+        0.0,
+        1.0
+      ]
+    ],
+    "T_world_cam": [
+      [
+        1.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      [
+        0.0,
+        -1.0,
+        -1.2246467991473532e-16,
+        0.0
+      ],
+      [
+        0.0,
+        1.2246467991473532e-16,
+        -1.0,
+        5.0
+      ],
+      [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ]
+    ],
+    "width": 1920,
+    "height": 1920,
+    "rgb_path": "/home/salman/rai_workspace/Voxel_manipulation_v2/pose_estimation/outputs/rgb/cam_dim_0.png",
+    "depth_path": "/home/salman/rai_workspace/Voxel_manipulation_v2/pose_estimation/outputs/depth/cam_dim_0.npy"
+  },
+  "cam_dim_1": {
+    "K": [
+      [
+        4635.2900390625,
+        0.0,
+        960.0
+      ],
+      [
+        0.0,
+        4635.2900390625,
+        960.0
+      ],
+      [
+        0.0,
+        0.0,
+        1.0
+      ]
+    ],
+    "T_world_cam": [
+      [
+        -1.0,
+        -1.2246467991473532e-16,
+        0.0,
+        0.0
+      ],
+      [
+        -3.169619151431765e-17,
+        0.25881904510252074,
+        -0.9659258262890683,
+        5.0
+      ],
+      [
+        1.1829179713786698e-16,
+        -0.9659258262890683,
+        -0.25881904510252074,
+        1.5
+      ],
+      [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ]
+    ],
+    "width": 1920,
+    "height": 1920,
+    "rgb_path": "/home/salman/rai_workspace/Voxel_manipulation_v2/pose_estimation/outputs/rgb/cam_dim_1.png",
+    "depth_path": "/home/salman/rai_workspace/Voxel_manipulation_v2/pose_estimation/outputs/depth/cam_dim_1.npy"
+  },
+  "cam_dim_2": {
+    "K": [
+      [
+        4635.2900390625,
+        0.0,
+        960.0
+      ],
+      [
+        0.0,
+        4635.2900390625,
+        960.0
+      ],
+      [
+        0.0,
+        0.0,
+        1.0
+      ]
+    ],
+    "T_world_cam": [
+      [
+        1.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      [
+        0.0,
+        -0.25881904510252124,
+        0.9659258262890681,
+        -5.0
+      ],
+      [
+        0.0,
+        -0.9659258262890681,
+        -0.25881904510252124,
+        1.5
+      ],
+      [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ]
+    ],
+    "width": 1920,
+    "height": 1920,
+    "rgb_path": "/home/salman/rai_workspace/Voxel_manipulation_v2/pose_estimation/outputs/rgb/cam_dim_2.png",
+    "depth_path": "/home/salman/rai_workspace/Voxel_manipulation_v2/pose_estimation/outputs/depth/cam_dim_2.npy"
+  },
+  "cam_dim_3": {
+    "K": [
+      [
+        4635.2900390625,
+        0.0,
+        960.0
+      ],
+      [
+        0.0,
+        4635.2900390625,
+        960.0
+      ],
+      [
+        0.0,
+        0.0,
+        1.0
+      ]
+    ],
+    "T_world_cam": [
+      [
+        -1.1102230246251565e-16,
+        0.2588190451025206,
+        -0.9659258262890684,
+        5.0
+      ],
+      [
+        1.0000000000000002,
+        1.1102230246251565e-16,
+        -5.551115123125783e-17,
+        0.0
+      ],
+      [
+        5.551115123125783e-17,
+        -0.9659258262890684,
+        -0.2588190451025205,
+        1.5
+      ],
+      [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ]
+    ],
+    "width": 1920,
+    "height": 1920,
+    "rgb_path": "/home/salman/rai_workspace/Voxel_manipulation_v2/pose_estimation/outputs/rgb/cam_dim_3.png",
+    "depth_path": "/home/salman/rai_workspace/Voxel_manipulation_v2/pose_estimation/outputs/depth/cam_dim_3.npy"
+  },
+  "cam_dim_4": {
+    "K": [
+      [
+        4635.2900390625,
+        0.0,
+        960.0
+      ],
+      [
+        0.0,
+        4635.2900390625,
+        960.0
+      ],
+      [
+        0.0,
+        0.0,
+        1.0
+      ]
+    ],
+    "T_world_cam": [
+      [
+        -1.1102230246251565e-16,
+        -0.25881904510252085,
+        0.9659258262890681,
+        -5.0
+      ],
+      [
+        -0.9999999999999999,
+        1.1102230246251565e-16,
+        -1.1102230246251565e-16,
+        0.0
+      ],
+      [
+        -1.1102230246251565e-16,
+        -0.9659258262890681,
+        -0.25881904510252085,
+        1.5
+      ],
+      [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ]
+    ],
+    "width": 1920,
+    "height": 1920,
+    "rgb_path": "/home/salman/rai_workspace/Voxel_manipulation_v2/pose_estimation/outputs/rgb/cam_dim_4.png",
+    "depth_path": "/home/salman/rai_workspace/Voxel_manipulation_v2/pose_estimation/outputs/depth/cam_dim_4.npy"
+  }
+}
