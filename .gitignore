@@ -130,5 +130,6 @@ z.log.*
 *.g
 
 *.png
+!environment_generation/mesh_dataset/**/*.png
 *.jpg
 *.npy
