@@ -48,7 +48,6 @@ class PandaTableMeshClutterGenerator:
         ("yellow", (1.0, 1.0, 0.0)),
         ("orange", (1.0, 0.5, 0.0)),
         ("purple", (0.5, 0.0, 1.0)),
-        ("white", (1.0, 1.0, 1.0)),
     )
 
     def __init__(
@@ -180,12 +179,31 @@ class PandaTableMeshClutterGenerator:
         candidates = [
             self._norm_path(p) for p in object_dir.iterdir()
             if p.is_file() and p.suffix.lower() in set(self.prefer_exts)
+            and not self._is_target_copy_mesh(p)
         ]
         ext_priority = {ext: i for i, ext in enumerate(self.prefer_exts)}
         candidates.sort(
             key=lambda p: (ext_priority.get(p.suffix.lower(), 999), p.name.lower())
         )
         return candidates
+
+    def _is_target_copy_mesh(self, mesh_path: Path) -> bool:
+        return mesh_path.suffix.lower() == ".off" and "copy" in mesh_path.stem.lower()
+
+    def _target_copy_mesh_path(self, primary_mesh: Path) -> Path:
+        stem = primary_mesh.stem
+        match = re.match(r"^(.*)_([0-9]+)$", stem)
+        if match:
+            copy_name = f"{match.group(1)}_copy_{match.group(2)}{primary_mesh.suffix}"
+        else:
+            copy_name = f"{stem}_copy{primary_mesh.suffix}"
+        return primary_mesh.with_name(copy_name)
+
+    def _ensure_target_copy_mesh(self, primary_mesh: Path) -> Path:
+        copy_mesh = self._target_copy_mesh_path(primary_mesh)
+        if not copy_mesh.exists():
+            shutil.copy2(primary_mesh, copy_mesh)
+        return self._norm_path(copy_mesh)
 
     def _mesh_local_bounds(self, mesh_path: Path, scale_factor: float):
         self._configure_mesh_loading()
@@ -254,6 +272,15 @@ class PandaTableMeshClutterGenerator:
             is_colorable_off_object = (
                 len(candidates) == 1 and selected_mesh.suffix.lower() == ".off"
             )
+            target_copy_mesh = None
+            target_copy_load_mesh = None
+            if is_colorable_off_object:
+                target_copy_mesh = self._ensure_target_copy_mesh(selected_mesh)
+                target_copy_load_mesh = (
+                    self._cache_busted_mesh_path(target_copy_mesh)
+                    if self.cache_bust_live_mesh_paths
+                    else target_copy_mesh
+                )
 
             local_min, local_max, computed_size_xyz = self._mesh_local_bounds(
                 selected_mesh,
@@ -277,6 +304,11 @@ class PandaTableMeshClutterGenerator:
                     "mesh_basename": selected_mesh.name,
                     "mesh_ext": selected_mesh.suffix.lower(),
                     "is_colorable_off_object": is_colorable_off_object,
+                    "target_copy_mesh_path": target_copy_mesh,
+                    "target_copy_load_mesh_path": target_copy_load_mesh,
+                    "target_copy_mesh_basename": (
+                        target_copy_mesh.name if target_copy_mesh is not None else None
+                    ),
                     "scale_factor": float(selected_record["scale_factor"]),
                     "aabb_size_xyz_after_scaling": [
                         float(v) for v in scaled_size_xyz
@@ -1100,13 +1132,21 @@ class PandaTableMeshClutterGenerator:
 
         frame_name = f"{prefix}mesh"
         self.object_counter += 1
+        role_mesh_path = mesh_info["mesh_path"]
+        role_load_mesh_path = mesh_info["load_mesh_path"]
+        role_mesh_basename = mesh_info["mesh_basename"]
+
+        if object_role == "goal_pose" and mesh_info.get("target_copy_mesh_path") is not None:
+            role_mesh_path = mesh_info["target_copy_mesh_path"]
+            role_load_mesh_path = mesh_info["target_copy_load_mesh_path"]
+            role_mesh_basename = mesh_info["target_copy_mesh_basename"]
 
         self._configure_mesh_loading()
         f = C.addFrame(frame_name)
         f.setPosition([x, y, z])
         f.setQuaternion(self._quat_from_z_rotation(theta))
         f.setMeshFile(
-            str(mesh_info["load_mesh_path"]),
+            str(role_load_mesh_path),
             scale=float(mesh_info["scale_factor"]),
         )
         if rgba is not None:
@@ -1120,9 +1160,9 @@ class PandaTableMeshClutterGenerator:
             "prefix": prefix,
             "frame_name": frame_name,
             "object_name": mesh_info["object_name"],
-            "mesh_path": str(mesh_info["mesh_path"]),
-            "loaded_mesh_path": str(mesh_info["load_mesh_path"]),
-            "mesh_basename": mesh_info["mesh_basename"],
+            "mesh_path": str(role_mesh_path),
+            "loaded_mesh_path": str(role_load_mesh_path),
+            "mesh_basename": role_mesh_basename,
             "spawn_xy": (x, y),
             "spawn_z": z,
             "theta_rad": theta,
@@ -1840,7 +1880,7 @@ class PandaTableMeshClutterGenerator:
                 f"goal_{self.target_object['mesh_basename']}" if self.target_object else None
             ),
             "goal_pose_mesh_basename": (
-                f"goal_pose_{self.target_object['mesh_basename']}"
+                f"goal_pose_{self.target_object.get('target_copy_mesh_basename') or self.target_object['mesh_basename']}"
                 if self.target_object
                 else None
             ),
