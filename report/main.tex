@@ -20,7 +20,7 @@
 \begin{document}
 
 \title{Semantic-Guided Manipulation for Targeted Object Retrieval in Highly Cluttered Environments\\
-{\large Final Report}}
+{\large Progress Report}}
 
 \author{
     \IEEEauthorblockN{Mahyar Fardinfar}
@@ -167,17 +167,18 @@ five low-clutter and five high-clutter scenes (manual evaluation).}
 \toprule
 Method               & Low (\,/5) & High (\,/5) & Overall (\,/10) \\
 \midrule
-CLIPSeg~\cite{clipseg}     & 3 & 1 & 4 \\
-SAM2 + DINO~\cite{sam2,dinov2} & 4 & 3 & 7 \\
-SAM3~\cite{sam3}           & \textbf{5} & \textbf{4} & \textbf{9} \\
+CLIPSeg~\cite{clipseg}     & 2 & 0 & 2 \\
+SAM2 + DINO~\cite{sam2,dinov2} & 3 & 1 & 4 \\
+SAM3~\cite{sam3}           & \textbf{4} & \textbf{2} & \textbf{6} \\
 \bottomrule
 \end{tabular}
 \end{table}
 
-SAM3 again yielded the most reliable behaviour, succeeding on every
-low-clutter scene and on four of the five high-clutter scenes; its
-single failure occurred when the query referred to an object that was
-mostly occluded by a larger foreground item. CLIPSeg degraded sharply
+SAM3 again yielded the most reliable behaviour, succeeding on four of
+the five low-clutter scenes and on two of the five high-clutter
+scenes; its failures occurred predominantly when the query referred
+to an object that was mostly occluded by a larger foreground item or
+when several visually similar objects were present in the same view. CLIPSeg degraded sharply
 in the high-clutter setting, where it tended to return diffuse,
 low-confidence masks spanning several visually similar objects. These
 results indicate that CLIPSeg is not competitive as a stand-alone
