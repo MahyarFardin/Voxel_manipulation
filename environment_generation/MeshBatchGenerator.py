@@ -13,7 +13,7 @@ def get_img(C: ry.Config, camera_view: ry.CameraView = None, cam_f: str = "cam0"
 
     cam = C.getFrame(cam_f)
     camera_view.setCamera(cam)
-    img, depth = camera_view.computeImageAndDepth(C)
+    img, depth = camera_view.computeImageAndDepth(C, visualsOnly=False)
     img = np.asarray(img)
     return img, depth, camera_view
 
@@ -67,7 +67,7 @@ def main(idx: int):
         panda_base_relative_pos=(0.0, 0.0, 0.05),
         target_alpha=0.35,
         target_center_jitter_ratio=0.05,
-        clutter_mode="high_clutter",
+        clutter_mode="low_clutter",
         placement_candidate_count=128,
         hardnessOfTargetObject=0.0,
     )
@@ -108,5 +108,5 @@ def main(idx: int):
 
 
 if __name__ == "__main__":
-    for idx in tqdm(range(20)):
+    for idx in tqdm(range(5)):
         main(idx)
