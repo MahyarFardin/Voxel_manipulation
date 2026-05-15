@@ -68,7 +68,7 @@ strong shadows on otherwise uniform surfaces, which caused single
 objects to be split into multiple regions. Moreover, this algorithm could not identify two adjacent objects with same color.
 
 \textbf{SAM2.} We next evaluated SAM2~\cite{sam2}, which produced
-substantially cleaner mask boundaries. However, SAM2 is class-agnostic (which was good for our task at this stage) but it failed to identify all the objects because our object domain was not, obviously, in its training data domain. Hence it does not process text queries it was also impossible to add context to it about the dynamics of our environment (simulation of voxels). To overcome this problem, We have tried integrating Dinov2~\cite{dinov2} with SAM2 which produced fairly good results but still lacked in detection of all the objects in the scene. 
+substantially cleaner mask boundaries. However, SAM2 is class-agnostic (which was good for our task at this stage) but it failed to identify all the objects because our object domain was not, obviously, in its training data domain. Hence it does not process text queries it was also impossible to add context to it about the dynamics of our environment (simulation of voxels). To overcome this problem, We have tried integrating Dinov2~\cite{dinov2} with SAM2 which produced fairly good results but still lacked in detection of all the objects in the scene.
 
 \textbf{SAM3.} Finally, we evaluated SAM3~\cite{sam3}, which extends the
 SAM family with native text prompting. SAM3 retained the boundary
@@ -80,12 +80,12 @@ for a separate language embedding module. This achieved the best result for our 
 \centering
 \begin{minipage}[t]{0.48\columnwidth}
   \centering
-\includegraphics[width=\linewidth]{voxel_env.png}\\[2pt]  
+\includegraphics[width=\linewidth]{voxel_env.png}\\[2pt]
 {\footnotesize (a) Voxel environment}
 \end{minipage}\hfill
 \begin{minipage}[t]{0.48\columnwidth}
   \centering
-\includegraphics[width=\linewidth]{new_env.png}\\[2pt]  
+\includegraphics[width=\linewidth]{new_env.png}\\[2pt]
   {\footnotesize (b) Random-object environment}
 \end{minipage}
 \caption{Sample views of the two simulation environments used in this
@@ -225,7 +225,187 @@ boundary; and (ii)~\emph{voxel-grid downsampling} replaces all points
 within a fixed-size voxel by their centroid, which enforces a uniform
 point density and bounds the size of the cloud passed to the
 subsequent processing stage.
+
+% ============================================================================
+\section{6DoF Object Pose Estimation}
+\label{sec:pose}
+% ============================================================================
+
+Recovering the full 6DoF pose of a target object is a prerequisite for
+closed-loop robot manipulation: the end-effector must know not only
+\emph{where} the object is but also \emph{how it is oriented} to plan a
+feasible grasp approach. In this section we describe the pose estimation
+pipeline, the detectors and estimators evaluated, and present a
+systematic 8-condition ablation study that quantifies their
+combined effect on accuracy, coverage, and runtime.
+
+\subsection{Pipeline and Methods}
+\label{subsec:pose_pipeline}
+
+The pose estimation pipeline operates on RGB-D input and proceeds in three stages:
+(i)~a \emph{detector} produces an axis-aligned bounding box given a
+text prompt or class label;
+(ii)~an optional \emph{mask} step refines the detection to a
+pixel-precise instance mask; and
+(iii)~a \emph{pose estimator} registers the known object mesh to the
+masked RGB-D crop and returns a $4\times4$ SE(3) transformation
+$\mathbf{T}_{\text{world},\text{obj}}$.
+
+\textbf{Detectors.}
+We evaluate four detection strategies.
+\emph{GroundingDINO}~\cite{gdino} is an open-vocabulary transformer that
+fuses BERT text features with a DINO image backbone via cross-attention,
+returning tight bounding boxes for arbitrary text prompts.
+\emph{YOLOv8}~\cite{yolov8} (fine-tuned) is a single-stage CNN trained
+on 400 synthetic images auto-annotated via mesh projection in the RAI
+simulator, covering 15 object classes; inference takes $<30$\,ms per
+frame.
+\emph{SAM2/SAM3}~\cite{sam2,sam3}, evaluated in Sec.~\ref{subsec:instance}
+for pure segmentation, are used here as \emph{mask refiners}:
+GroundingDINO provides the initial bounding box, which is passed as a
+spatial prompt to SAM2 or SAM3 to produce a pixel-accurate instance
+mask. As established in Sec.~\ref{subsec:instance}, SAM3 yields
+sharper boundaries than SAM2, particularly around thin and irregular
+objects; this mask quality difference, as we show below, has a
+significant downstream effect on pose accuracy.
+For detector conditions without SAM, a lightweight
+\emph{depth-threshold mask} is used instead: the median depth within
+the central 30\% of the bounding box is computed and all pixels within
+$\pm15$\,cm are retained.
+
+\textbf{Pose estimators.}
+\emph{MegaPose}~\cite{megapose} is a model-free estimator that scores a
+dense grid of SO(3) hypotheses using a contrastive image encoder, then
+refines the best candidate with an RGBD refiner; no object-specific
+training is required.
+\emph{FoundationPose}~\cite{foundationpose} renders the mesh via
+differentiable rasterisation (nvdiffrast), scores candidates with a
+learned network, and refines the result iteratively; it also requires
+only the object mesh and has demonstrated state-of-the-art accuracy on
+standard benchmarks.
+
+\subsection{Experimental Setup}
+\label{subsec:pose_setup}
+
+The results reported here are from scene \texttt{env\_80.g} rendered in
+the RAI simulator, which contains six household objects: a lamp,
+a red cup, a wine bottle, a cracker box, a traffic cone, and a deodorant
+can. Among the available camera viewpoints, the top-down camera
+(\texttt{cam\_0}) at 1920$\times$1080 resolution was found to yield
+the most complete object visibility and was used as the primary input
+for all conditions. Ground-truth poses are obtained directly
+from the simulator. Three metrics are reported per object: (i) Euclidean
+\emph{position error} (cm); (ii) geodesic \emph{rotation error}
+($^{\circ}$); and (iii) \emph{ADD success}, which is positive when the
+average distance of transformed mesh vertices under the estimated and
+ground-truth poses is below $10\%$ of the object diameter, following
+the standard YCB-Video protocol.
+
+\begin{figure}[!t]
+\centering
+\includegraphics[width=\linewidth]{cam_dim_0.png}
+\caption{Top-down view of the test scene (\texttt{env\_80.g}) rendered
+in the RAI simulator. The six target objects are visible on the
+table surface: lamp (yellow), red cup, wine bottle (black), cracker
+box (Cheez-It), traffic cone, and deodorant can.}
+\label{fig:env80}
+\end{figure}
+
+\subsection{Results}
+\label{subsec:pose_results}
+
+Table~\ref{tab:pose_summary} reports per-method means over successfully
+estimated objects. Fig.~\ref{fig:heatmap} visualises all four metrics
+simultaneously as a colour-coded heatmap (green = better).
+
+\begin{table}[!t]
+\caption{Pose estimation ablation: mean metrics per condition (computed
+over objects for which a pose estimate was produced). YOLO detects only
+2 of 6 objects (lamp and cone); all other detectors cover 4--6 objects.}
+\label{tab:pose_summary}
+\centering
+\renewcommand{\arraystretch}{1.15}
+\setlength{\tabcolsep}{4pt}
+\begin{tabular}{lcccc}
+\toprule
+Method & Det. & Pos.\ err.\ (cm) & Rot.\ err.\ ($^{\circ}$) & ADD (\%) \\
+\midrule
+GDino + MegaPose  & 6 & 174.8 & 133.2 & 0.0 \\
+SAM2  + MegaPose  & 6 & 141.4 & 143.7 & 0.0 \\
+SAM3  + MegaPose  & 6 & 404.1 & 135.8 & 0.0 \\
+YOLO  + MegaPose  & 2 &  54.6 &  85.9 & 50.0 \\
+\midrule
+GDino + FP        & 4 &  69.4 & 116.6 & 0.0 \\
+SAM2  + FP        & 4 &  68.0 & 128.2 & 0.0 \\
+SAM3  + FP        & 5 &  60.1 &  94.1 & 20.0 \\
+\textbf{YOLO  + FP} & 2 & \textbf{17.9} & \textbf{59.5} & \textbf{50.0} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{figure}[!t]
+\centering
+% Image path relative to project root: plot_heatmap.png
+\includegraphics[width=\linewidth]{plot_heatmap.png}
+\caption{Ablation heatmap: mean position error, rotation error, ADD
+success rate, and total runtime across all eight detector--estimator
+conditions. Colours are normalised per column (green = better). YOLO
+conditions cover only 2 of 6 objects; means for other conditions are
+computed over 4--6 objects.}
+\label{fig:heatmap}
+\end{figure}
+
+\subsection{Analysis}
+\label{subsec:pose_analysis}
+
+\textbf{FoundationPose consistently outperforms MegaPose.}
+Across every detector, FoundationPose (FP) achieves lower position
+error than MegaPose (MP). MegaPose fails the ADD test entirely on all
+conditions except YOLO, suggesting that its coarse hypothesis-scoring
+stage struggles with the clutter and viewpoint distribution of this
+scene. FP's differentiable rendering approach, which directly scores
+candidates against the masked depth crop, is more tightly coupled to
+scene geometry and therefore more robust.
+
+\textbf{Mask quality propagates to pose accuracy -- but differently for
+each estimator.}
+SAM2 reduces MegaPose's mean position error from 174.8\,cm (GDino) to
+141.4\,cm ($-19\%$), consistent with the mask improvement reported in
+Sec.~\ref{subsec:instance}. SAM3, however, \emph{increases} MegaPose's
+error to 404.1\,cm. We attribute this to the tighter object boundaries
+produced by SAM3: MegaPose's coarse stage operates on a crop centred on
+the bounding box, and an overly tight mask can exclude context needed
+for hypothesis scoring.
+FoundationPose shows the opposite pattern: SAM3 reduces mean position
+error to 60.1\,cm versus 69.4\,cm for GDino and 68.0\,cm for SAM2,
+and raises ADD success to $20\%$ (from $0\%$). This is because FP
+scores candidates directly against the masked depth region; a cleaner
+SAM3 mask removes background depth noise and produces more accurate
+object crops for the scoring network. The best single-object result in
+the entire study is SAM3+FP on the lamp: $0.06$\,cm position error and
+$100\%$ ADD success.
+
+\textbf{YOLO+FP achieves the best accuracy--speed trade-off.}
+On the two objects it detects (lamp and cone), YOLO+FP achieves a mean
+position error of only 17.9\,cm, the lowest across all conditions, and
+$50\%$ ADD success at a mean runtime of 2.1\,s per object -- roughly
+$7\times$ faster than the next-best FP condition and $32\times$ faster
+than GDino+MegaPose. The lamp pose is recovered to within 0.07\,cm.
+The limitation is coverage: only 2 of 6 target objects belong to the
+15-class YOLO vocabulary, making it unsuitable as a standalone
+solution without retraining.
+
+\textbf{Runtime.}
+MegaPose is computationally expensive ($35$--$68$\,s per object mean)
+due to dense SO(3) hypothesis scoring, while FP averages $14$--$19$\,s.
+YOLO reduces detection time to under 0.1\,s versus $0.6$--$8.7$\,s for
+language-based detectors, giving YOLO+FP the shortest end-to-end
+latency. For a real-time manipulation system, YOLO+FP with an
+expanded object vocabulary is the most viable path.
+
+% ============================================================================
 \section{Grasp Generation}
+% ============================================================================
 
 Once the target object pose is estimated, the system must identify grasp configurations that are not only geometrically stable but also physically executable in cluttered scenes. To achieve this, grasp generation is performed directly on the reconstructed object geometry. The object mesh is transformed into the world frame using the estimated pose, and dense surface points are sampled from the mesh to form a point cloud representation suitable for geometric grasp analysis.
 
@@ -275,6 +455,7 @@ For the lamp object, the effect of the heuristics became more visible. PCA-based
 Elongated object such as the glue bottle was the third observed case. The baseline and PCA-only configurations frequently selected geometrically strong grasps that were partially blocked by the object geometry. Clearance reasoning substantially reduced the number of heavily blocked candidates, reducing the blocking count from 79 to 10 in the evaluated glue observations. However, the full weighted scoring could still occasionally favor highly aligned but partially obstructed grasps. This highlights a limitation of soft weighted scoring and suggests that future work may require stronger collision filtering or clearance parameters that adapt to different object geometries.
 
 Overall, the study showed that geometric grasp quality alone is insufficient for robust manipulation in cluttered scenes. Clearance-aware reasoning substantially improved physical feasibility, particularly for irregular objects, while also revealing some limitations for elongated geometries.
+
 \begin{thebibliography}{9}
 \bibitem{sam2} N. Ravi \emph{et al.}, ``SAM~2: Segment Anything in
 Images and Videos,'' \emph{arXiv:2408.00714}, 2024.
@@ -284,6 +465,17 @@ Technical Report, 2025.
 Using Text and Image Prompts,'' in \emph{Proc. CVPR}, 2022.
 \bibitem{dinov2} M. Oquab \emph{et al.}, ``DINOv2: Learning Robust
 Visual Features without Supervision,'' \emph{arXiv:2304.07193}, 2023.
+\bibitem{gdino} S. Liu \emph{et al.}, ``Grounding DINO: Marrying DINO
+with Grounded Pre-Training for Open-Set Object Detection,''
+\emph{arXiv:2303.05499}, 2023.
+\bibitem{yolov8} G. Jocher \emph{et al.}, ``Ultralytics YOLOv8,''
+\url{https://github.com/ultralytics/ultralytics}, 2023.
+\bibitem{megapose} Y. Labb\'e \emph{et al.}, ``MegaPose: 6DoF Pose
+Estimation of Novel Objects via Render \& Compare,''
+\emph{CoRL}, 2022.
+\bibitem{foundationpose} B. Wen \emph{et al.}, ``FoundationPose:
+Unified 6DoF Pose Estimation and Tracking of Novel Objects,''
+\emph{CVPR}, 2024.
 \end{thebibliography}
 
 \end{document}
