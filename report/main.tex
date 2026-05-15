@@ -3,6 +3,9 @@
 
 \usepackage{cite}
 \usepackage{amsmath,amssymb,amsfonts}
+\usepackage{algorithm}
+\usepackage{algpseudocode}
+\usepackage{url}
 \usepackage{graphicx}
 \usepackage{booktabs}
 \usepackage{array}
@@ -40,6 +43,83 @@
 }
 
 \maketitle
+
+\section{Environment Generation}
+
+\subsection{Task Setup and Mesh-Based Scene Construction}
+
+The environment generation module is designed for targeted object retrieval in cluttered tabletop scenes. The task is to create a scene in which a Franka Panda robot must identify and retrieve a specific target object from a set of distractor objects. Therefore, the environment should not only contain visually and physically diverse clutter, but also define a clear manipulation goal. To achieve this, each scene contains two versions of the target object: a physical target object placed inside the clutter, and a more transparent version of the same target object that determines the desired goal pose. We refer to this second object as the goal pose object. It visually specifies where the target object should be placed, while the physical target object is the one that must be retrieved from the clutter.
+
+In the earlier stage of the project, we used voxel-based objects to quickly test the overall simulation and manipulation pipeline. However, the main environment generator was later extended to mesh-based objects with more realistic geometry and textures. This makes the generated scenes closer to real-world tabletop manipulation settings, since the objects have richer shapes, more varied contact behavior, and more meaningful visual appearance. Each scene starts from a fixed robot-table setup, after which the generator samples mesh objects from the object dataset and places them on the table using a physics-based procedure.
+
+Instead of directly assigning final object poses, objects are first spawned slightly above the table in small batches. After each batch is added, the NVIDIA PhysX engine~\cite{physx} is run so that the objects fall under gravity, collide with the table and with each other, and settle naturally. The scene is then checked for validity: objects that fall outside the table boundaries or move below an acceptable height threshold are removed. If the desired number of valid objects has not yet been reached, additional objects are spawned and the process is repeated. This iterative spawn--simulate--validate--refill procedure produces cluttered scenes that are physically plausible rather than only geometrically sampled.
+
+\begin{figure}[!t]
+\centering
+\begin{minipage}[t]{0.48\columnwidth}
+  \centering
+  \includegraphics[width=\linewidth]{mesh_low_clutter.png}\\[2pt]
+  {\footnotesize (a) Low-clutter mesh scene}
+\end{minipage}\hfill
+\begin{minipage}[t]{0.48\columnwidth}
+  \centering
+  \includegraphics[width=\linewidth]{mesh_high_clutter_hard.png}\\[2pt]
+  {\footnotesize (b) High-clutter mesh scene}
+\end{minipage}
+\caption{Examples of generated mesh-based tabletop environments. The generator samples initial drop locations, while physics simulation determines the final settled object arrangement.}
+\label{fig:mesh_envs}
+\end{figure}
+
+\subsection{Clutter Modes and Target Difficulty}
+
+The generator supports three clutter modes: low clutter, random clutter, and high clutter. In the low-clutter mode, candidate spawn locations are selected to keep objects more separated from one another, producing scenes where the target is generally easier to perceive and access, as shown in Fig.~\ref{fig:mesh_envs}(a). In the random mode, object locations are sampled randomly from the allowed table regions, which increases scene diversity. In the high-clutter mode, new objects are initialized closer to existing clutter, increasing the probability of contact, occlusion, local crowding, and stacking after physics simulation, as shown in Fig.~\ref{fig:mesh_envs}(b). These modes control the initial drop locations, but the final object poses are still determined by the physics engine.
+
+The difficulty of the retrieval task can also be adjusted by controlling when the physical target object is inserted into the clutter generation sequence. Let $N$ be the desired number of clutter objects and let $h \in [0,1]$ denote the desired difficulty level. The insertion position of the target is computed as
+\begin{equation}
+    i_{\mathrm{target}} =
+    \mathrm{round}\left((1-h)(N-1)\right)
+\end{equation}
+When $h$ is close to zero, the target is inserted late in the sequence, so fewer objects are dropped after it and the target is more likely to remain visible and accessible. When $h$ is close to one, the target is inserted earlier, allowing later objects to fall around it, push it, or partially cover it. Thus, increasing the difficulty value generally produces scenes in which the target is more occluded and harder to retrieve.
+
+The overall generation pipeline is summarized in Algorithm~\ref{alg:env_generation}.
+This procedure allows us to generate retrieval scenarios with controlled clutter
+density and target visibility. For example, a low-clutter scene with late target insertion can be used for debugging and simpler manipulation trials, while a high-clutter scene with early target insertion creates a more challenging case where the target may be visually occluded or physically surrounded by other objects.
+
+\begin{algorithm}[!t]
+\caption{Mesh-Based Environment Generation}
+\label{alg:env_generation}
+\begin{algorithmic}[1]
+\Require Desired object count $N$, clutter mode $m$, difficulty value $h$
+\Ensure Valid tabletop scene with a physical target object and a goal pose object
+
+\State Load the base Panda-table scene.
+\State Select a target mesh object and a desired goal-pose region.
+\State Compute the target insertion index:
+\[
+    i_{\mathrm{target}} = \mathrm{round}\left((1-h)(N-1)\right)
+\]
+
+\State Initialize the set of valid tabletop objects as empty.
+
+\While{the number of valid objects is less than $N$ and the maximum number of attempts is not reached}
+    \State Select the next object to spawn.
+    \If{the current insertion index equals $i_{\mathrm{target}}$}
+        \State Select the physical target object as the next spawned object.
+    \EndIf
+
+    \State Sample an initial drop location according to clutter mode $m$.
+    \State Spawn the selected object above the tabletop.
+    \State Run the physics simulation to let objects fall, collide, and settle.
+    \State Remove objects that are outside the table or below the valid height threshold.
+    \State Update the set of valid tabletop objects.
+\EndWhile
+
+\State Spawn a more transparent copy of the target object at the desired goal pose.
+\State Let the goal pose object settle under physics simulation.
+\State Convert the goal pose object into a translucent non-contact object.
+\State Save the final validated scene for later use.
+\end{algorithmic}
+\end{algorithm}
 
 \section{Point-cloud construction}
 
@@ -227,6 +307,9 @@ point density and bounds the size of the cloud passed to the
 subsequent processing stage.
 
 \begin{thebibliography}{9}
+\bibitem{physx}
+NVIDIA, ``NVIDIA PhysX SDK Documentation: Rigid Body Dynamics,'' 2024.
+[Online]. Available: \url{https://nvidia-omniverse.github.io/PhysX/physx/5.4.1/docs/RigidBodyDynamics.html}
 \bibitem{sam2} N. Ravi \emph{et al.}, ``SAM~2: Segment Anything in
 Images and Videos,'' \emph{arXiv:2408.00714}, 2024.
 \bibitem{sam3} Meta AI, ``SAM~3: Segment Anything with Concepts,''
