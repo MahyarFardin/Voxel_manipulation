@@ -1,0 +1,5 @@
+path: /home/salman/rai_workspace/ablation_study/yolo_dataset
+train: images/train
+val:   images/val
+nc: 15
+names: ['airplane', 'bed', 'car', 'chair', 'cone', 'firefighterFigure', 'guitar', 'lamp', 'laptop', 'monitor', 'piano', 'stairs', 'table', 'vase', 'xbox']

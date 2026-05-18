@@ -1,0 +1,247 @@
+{
+  "cam_dim_0": {
+    "K": [
+      [
+        4635.2900390625,
+        0.0,
+        960.0
+      ],
+      [
+        0.0,
+        4635.2900390625,
+        960.0
+      ],
+      [
+        0.0,
+        0.0,
+        1.0
+      ]
+    ],
+    "T_world_cam": [
+      [
+        1.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      [
+        0.0,
+        -1.0,
+        -1.224646e-16,
+        0.0
+      ],
+      [
+        0.0,
+        1.224646e-16,
+        -1.0,
+        5.0
+      ],
+      [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ]
+    ],
+    "width": 1920,
+    "height": 1920,
+    "rgb_path": "/home/salman/rai_workspace/ablation_study/yolo_dataset/images/val/env_79_cam_dim_0.png",
+    "depth_path": "/home/salman/rai_workspace/ablation_study/yolo_dataset/depth/env_79_cam_dim_0.npy"
+  },
+  "cam_dim_1": {
+    "K": [
+      [
+        4635.2900390625,
+        0.0,
+        960.0
+      ],
+      [
+        0.0,
+        4635.2900390625,
+        960.0
+      ],
+      [
+        0.0,
+        0.0,
+        1.0
+      ]
+    ],
+    "T_world_cam": [
+      [
+        -1.0,
+        -1.2246479051387301e-16,
+        -1.4699615606634916e-23,
+        0.0
+      ],
+      [
+        -3.169623745356216e-17,
+        0.25881930242398027,
+        -0.9659257573399542,
+        5.0
+      ],
+      [
+        1.1829189932913592e-16,
+        -0.9659257573399542,
+        -0.25881930242398027,
+        1.5
+      ],
+      [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ]
+    ],
+    "width": 1920,
+    "height": 1920,
+    "rgb_path": "/home/salman/rai_workspace/ablation_study/yolo_dataset/images/val/env_79_cam_dim_1.png",
+    "depth_path": "/home/salman/rai_workspace/ablation_study/yolo_dataset/depth/env_79_cam_dim_1.npy"
+  },
+  "cam_dim_2": {
+    "K": [
+      [
+        4635.2900390625,
+        0.0,
+        960.0
+      ],
+      [
+        0.0,
+        4635.2900390625,
+        960.0
+      ],
+      [
+        0.0,
+        0.0,
+        1.0
+      ]
+    ],
+    "T_world_cam": [
+      [
+        1.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      [
+        0.0,
+        -0.25881930242398027,
+        0.9659257573399542,
+        -5.0
+      ],
+      [
+        0.0,
+        -0.9659257573399542,
+        -0.25881930242398027,
+        1.5
+      ],
+      [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ]
+    ],
+    "width": 1920,
+    "height": 1920,
+    "rgb_path": "/home/salman/rai_workspace/ablation_study/yolo_dataset/images/val/env_79_cam_dim_2.png",
+    "depth_path": "/home/salman/rai_workspace/ablation_study/yolo_dataset/depth/env_79_cam_dim_2.npy"
+  },
+  "cam_dim_3": {
+    "K": [
+      [
+        4635.2900390625,
+        0.0,
+        960.0
+      ],
+      [
+        0.0,
+        4635.2900390625,
+        960.0
+      ],
+      [
+        0.0,
+        0.0,
+        1.0
+      ]
+    ],
+    "T_world_cam": [
+      [
+        0.0,
+        0.25882055730687903,
+        -0.9659254210938629,
+        5.0
+      ],
+      [
+        0.9999999999999999,
+        0.0,
+        0.0,
+        0.0
+      ],
+      [
+        0.0,
+        -0.9659254210938629,
+        -0.25882055730687903,
+        1.5
+      ],
+      [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ]
+    ],
+    "width": 1920,
+    "height": 1920,
+    "rgb_path": "/home/salman/rai_workspace/ablation_study/yolo_dataset/images/val/env_79_cam_dim_3.png",
+    "depth_path": "/home/salman/rai_workspace/ablation_study/yolo_dataset/depth/env_79_cam_dim_3.npy"
+  },
+  "cam_dim_4": {
+    "K": [
+      [
+        4635.2900390625,
+        0.0,
+        960.0
+      ],
+      [
+        0.0,
+        4635.2900390625,
+        960.0
+      ],
+      [
+        0.0,
+        0.0,
+        1.0
+      ]
+    ],
+    "T_world_cam": [
+      [
+        0.0,
+        -0.25882055730687903,
+        0.9659254210938629,
+        -5.0
+      ],
+      [
+        -0.9999999999999999,
+        0.0,
+        0.0,
+        0.0
+      ],
+      [
+        0.0,
+        -0.9659254210938629,
+        -0.25882055730687903,
+        1.5
+      ],
+      [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ]
+    ],
+    "width": 1920,
+    "height": 1920,
+    "rgb_path": "/home/salman/rai_workspace/ablation_study/yolo_dataset/images/val/env_79_cam_dim_4.png",
+    "depth_path": "/home/salman/rai_workspace/ablation_study/yolo_dataset/depth/env_79_cam_dim_4.npy"
+  }
+}
